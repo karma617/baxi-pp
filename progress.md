@@ -783,3 +783,138 @@ Hermes 页面预加载保留以热身 session cookie。
 - tests/test_authorize_success_gate.py：新增 OAS/ANONYMOUS 单测
 回滚：git checkout -- paypal/flow.py docs/hermes-session-bind.md tests/test_authorize_success_gate.py
 未自动重启网页服务。
+
+## 2026-07-16 - Task: 一键启动脚本并跑通项目
+
+### What was done
+本地项目已跑通网页端；增强根目录 `start.bat` 一键启动脚本：自动检测 Python、创建/复用 `.venv`、安装依赖、延迟打开浏览器、启动 `web.py`。同步更新启动说明。
+
+### Testing
+- 创建 `.venv` 并安装 `requirements.txt` 成功
+- `python -m py_compile web.py main.py config.py` 通过
+- 直接启动 `web.py --host 127.0.0.1 --port 8080`：HTTP 200
+- 执行 `start.bat`（`PAYPAL_WEB_PORT=18080`）：服务启动并 HTTP 200
+
+### Notes
+改动文件：
+- start.bat：增强一键启动（Python 检测、复用 venv、延迟打开浏览器）
+- docs/start-bat.md：同步启动说明
+回滚：git checkout -- start.bat docs/start-bat.md
+当前验证服务在后台监听 8080/18080，不需要时可手动关闭对应窗口或进程。
+
+## 2026-07-16 - Task: BR Phase4 按 HAR 改为 ContextQuery returnURL
+
+### What was done
+根据 BR HAR 重新拆分 Phase4：BR 不再套用 authorize 或 `/pay/billing` 链路，而是在 Hermes 绑定后调用 `BillingAgreementContextQueryForAddCard`，带 EUAT/AT 和 billingAgreementId 获取 `returnURL` 后访问回跳地址。Hermes reason 对齐 BR HAR 的 `R_ERROR`。US/BA 链路保持独立，不套用 BR 逻辑。
+
+### Testing
+- python -m py_compile paypal/flow.py paypal/graphql.py paypal/us_flow.py web.py
+- python -m unittest tests.test_authorize_success_gate -v：7 passed
+- python -m unittest tests.test_ba_har_contract -v：6 passed
+- python -m unittest discover -v：0 tests discovered（仓库未配置默认 discover 命名入口）
+
+### Notes
+改动文件：
+- paypal/flow.py：新增 BR ContextQuery-returnURL Phase4，BR Hermes reason 改为 R_ERROR
+- paypal/graphql.py：扩展 BillingAgreementContextQueryForAddCard 的 buyer 字段
+- tests/test_authorize_success_gate.py：改为验证 BR 不再调用 authorize，直接使用 context returnURL
+- docs/hermes-session-bind.md：同步 BR/US/BA 分链路说明
+- progress.md：追加本轮施工记录
+回滚：git checkout -- paypal/flow.py paypal/graphql.py tests/test_authorize_success_gate.py docs/hermes-session-bind.md progress.md
+
+## 2026-07-16 - Task: start.bat 增加端口占用清理
+
+### What was done
+一键启动脚本默认端口从 `8080` 改为 `18765`；启动前会检查当前配置端口的 `LISTENING` 进程，若端口被占用则自动结束占用该端口的 PID 后再启动网页端。同步更新启动说明。
+
+### Testing
+- 手动用 Python HTTP server 占用 `127.0.0.1:18765`
+- 执行 `start.bat`：脚本识别并结束占用 PID，随后启动 `web.py`
+- 访问 `http://127.0.0.1:18765/` 返回 HTTP 200
+- python -m py_compile web.py main.py config.py
+
+### Notes
+改动文件：
+- start.bat：默认端口改为 18765，并新增端口占用进程清理逻辑
+- docs/start-bat.md：同步默认端口和端口清理说明
+- progress.md：追加本轮施工记录
+回滚：git checkout -- start.bat docs/start-bat.md progress.md
+当前验证服务已在 `127.0.0.1:18765` 启动。
+
+## 2026-07-16 - Task: BR Phase4 恢复 authorize 强成功门禁
+
+### What was done
+根据补充说明和截图修正 BR Phase4：`BillingAgreementContextQueryForAddCard.returnURL` 不再作为成功依据，只用于预热和诊断；BR 在 authorize 前打开 Hermes `billingLite=1#/billingweb/review` 绑定 Hagrid review，会话绑定后必须执行 `billing.authorize`，只有 `authorize.returnURL` 才标记成功。`BUYER_NOT_SET` 仍保持 fail-closed，不再用 ContextQuery 假成功。
+
+### Testing
+- python -m py_compile paypal/flow.py paypal/graphql.py paypal/us_flow.py web.py
+- python -m unittest tests.test_authorize_success_gate -v：7 passed
+- python -m unittest tests.test_ba_har_contract -v：6 passed
+
+### Notes
+改动文件：
+- paypal/flow.py：BR Phase4 新增 billing review 绑定，ContextQuery 改为预热，最终必须 authorize
+- tests/test_authorize_success_gate.py：测试 BR ContextQuery 后仍需 authorize 成功
+- docs/hermes-session-bind.md：同步 BR 成功判定和 BUYER_NOT_SET 门禁说明
+- progress.md：追加本轮施工记录
+回滚：git checkout -- paypal/flow.py tests/test_authorize_success_gate.py docs/hermes-session-bind.md progress.md
+需要重启网页服务后新逻辑才生效。
+
+## 2026-07-16 - Task: Phase0 失效链接不再等待浏览器
+
+### What was done
+针对 PayPal approve 链接失效/当前会话不可用的页面增加终止识别：当页面出现 “Parece que as coisas não estão funcionando no momento” 或英文同类错误时，有头浏览器辅助会立即退出并返回 `paypal_unavailable_or_invalid_link`，Phase0 会跳过人工验证码等待，改为按现有逻辑换代理或最终明确报错。同步修复 `_run_headed_browser_assist` 未透传浏览器上下文 authorize 参数的问题，保证 BR Phase4 已接入的浏览器 authorize 能实际执行。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile paypal\flow.py paypal\browser_assist.py paypal\graphql.py web.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_browser_proxy_binding -v：6 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_authorize_success_gate -v：7 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：6 passed
+- 通过 start.bat 重启网页服务后访问 http://127.0.0.1:18765/：HTTP 200
+
+### Notes
+改动文件：
+- paypal/browser_assist.py：新增 PayPal 失效/不可用错误页识别，并在浏览器轮询中遇到该页立即退出；保留浏览器上下文 authorize 结果回传
+- paypal/flow.py：Phase0 接收失效链接原因后跳过等待并换代理/失败；包装函数补齐 authorize 参数透传
+- tests/test_browser_proxy_binding.py：新增葡语失效页识别和正常 signup 页不误判的单测
+- docs/signup-browser-assist.md：同步说明 PayPal 错误页不需要人工等待
+- progress.md：追加本轮施工记录
+回滚：当前工作树包含前序未提交改动，不建议直接 `git checkout -- paypal/browser_assist.py paypal/flow.py` 覆盖整文件；如需回滚本轮，应仅反向移除本轮新增的失效页识别、Phase0 `paypal_unavailable_or_invalid_link` 分支、`_run_headed_browser_assist` authorize 参数透传、对应测试和文档行。
+
+## 2026-07-16 - Task: 浏览器 SignUp 异常不再标记成功
+
+### What was done
+根据 12:16 日志修正浏览器 SignUp 辅助的结果门禁：当页面最终落到 `chrome-error://chromewebdata/` 或浏览器内 `SignUpNewMember` 抛出 `BROWSER_SIGNUP_EXCEPTION` 且没有 onboardAccount/accessToken 时，不再输出 `Headed browser assist cleared`，而是返回 `signup_browser_submission_failed`。如果 PayPal 错误响应里带 accessToken，仍允许继续 Phase4。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile paypal\flow.py paypal\browser_assist.py paypal\graphql.py web.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_browser_proxy_binding -v：8 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_authorize_success_gate -v：7 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：6 passed
+- 通过 start.bat 重启网页服务后访问 http://127.0.0.1:18765/：HTTP 200
+
+### Notes
+改动文件：
+- paypal/browser_assist.py：新增浏览器 SignUp 结果失败判定，避免 `chrome-error://`/Failed to fetch 被误报为 cleared
+- tests/test_browser_proxy_binding.py：新增浏览器 SignUp 异常不算成功、带 accessToken 可继续的单测
+- progress.md：追加本轮施工记录
+回滚：当前工作树包含前序未提交改动，不建议整文件 checkout；如需回滚本轮，仅反向移除 `_signup_result_is_browser_submission_failure`、`_dict_contains_key_with_value`、浏览器 SignUp 失败返回分支和对应两条测试。
+
+## 2026-07-16 - Task: BR Phase4 改为浏览器上下文 authorize
+
+### What was done
+根据最新日志继续修复 `BUYER_NOT_SET`：BR 在 Hermes billing review 页面打开后，优先在有头浏览器页面上下文内执行 `BillingAgreementContextQueryForAddCard + billing.authorize`，请求带 `credentials=include`、EUAT 和 billingAgreementId，尽量保留 PayPal 浏览器态。httpx authorize 只作为浏览器 authorize 没有拿到 `returnURL` 时的 fallback。
+
+### Testing
+- python -m py_compile paypal/flow.py paypal/browser_assist.py paypal/graphql.py web.py
+- python -m unittest tests.test_authorize_success_gate -v：7 passed
+- python -m unittest tests.test_ba_har_contract -v：6 passed
+
+### Notes
+改动文件：
+- paypal/browser_assist.py：新增浏览器页面上下文 billing context warmup + authorize
+- paypal/flow.py：BR Phase4 接入浏览器 authorize 结果，失败再回退 httpx
+- docs/hermes-session-bind.md：同步 BR 浏览器上下文 authorize 说明
+- progress.md：追加本轮施工记录
+回滚：git checkout -- paypal/browser_assist.py paypal/flow.py docs/hermes-session-bind.md progress.md
+需要重启网页服务后新逻辑才生效。

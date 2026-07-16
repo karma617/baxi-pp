@@ -16,6 +16,7 @@ BR 流程在 OTP 成功后，纯 HTTP `SignUpNewMemberMutation` 可能返回 `au
 ## 操作提示
 - 正常 signup 表单：无需操作
 - 出现 captcha/slider：在浏览器窗口手动完成
+- 出现 PayPal “Parece que as coisas não estão funcionando no momento” / “things don't appear to be working” 错误页：系统会判定为链接失效或当前会话不可用，立即退出本次浏览器等待并进入换代理/失败流程
 - 服务需手动重启后重跑 BR 任务验证
 
 ## 代理绑定

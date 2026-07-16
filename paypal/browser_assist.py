@@ -106,6 +106,51 @@ def _mask_proxy_for_log(proxy_url: str | None) -> str:
     return server or "on"
 
 
+def _normalize_page_text(text: str) -> str:
+    low = (text or "").lower()
+    trans = str.maketrans({
+        "á": "a", "à": "a", "ã": "a", "â": "a",
+        "é": "e", "ê": "e",
+        "í": "i",
+        "ó": "o", "ô": "o", "õ": "o",
+        "ú": "u", "ü": "u",
+        "ç": "c",
+    })
+    return low.translate(trans)
+
+
+def _is_paypal_unavailable_or_invalid_link_html(url: str, html: str) -> bool:
+    """Detect PayPal generic failure/expired agreement pages that cannot be solved."""
+    text = html or ""
+    norm = _normalize_page_text(text)
+    url_l = (url or "").lower()
+    small_or_agreement = len(text) < 25000 or "agreements/approve" in url_l
+    if not small_or_agreement:
+        return False
+    markers = (
+        "parece que as coisas nao estao funcionando no momento",
+        "things don't appear to be working at the moment",
+        "things don t appear to be working at the moment",
+        "things arent working at the moment",
+        "things are not working at the moment",
+        "something went wrong",
+        "link is invalid or expired",
+        "this link is invalid",
+        "your session has expired",
+    )
+    if not any(marker in norm for marker in markers):
+        return False
+    success_markers = (
+        "checkoutweb/signup",
+        "numero do cartao",
+        "card number",
+        "EC-",
+        "ctxId",
+        "billingAgreementContext",
+    )
+    return not any(marker.lower() in norm for marker in success_markers)
+
+
 def _is_hard_challenge_html(text: str) -> bool:
     """True only for real captcha/authchallenge shells, not normal signup pages."""
     low = (text or "").lower()
@@ -176,6 +221,9 @@ def _page_looks_usable(url: str, html: str) -> bool:
     text = html or ""
     low = text.lower()
     url_l = (url or "").lower()
+
+    if _is_paypal_unavailable_or_invalid_link_html(url, text):
+        return False
 
     # Highest priority: real signup form already visible. Operator need do nothing.
     if _is_signup_form_html(url, text):
@@ -411,6 +459,152 @@ def _browser_signup_new_member(
     return {"data": {}, "errors": [{"message": "INVALID_RESPONSE", "errorData": {}}]}
 
 
+def _dict_contains_key_with_value(value: Any, key: str) -> bool:
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if k == key and v:
+                return True
+            if _dict_contains_key_with_value(v, key):
+                return True
+    elif isinstance(value, list):
+        return any(_dict_contains_key_with_value(item, key) for item in value)
+    return False
+
+
+def _signup_result_is_browser_submission_failure(result: dict[str, Any] | None, final_url: str) -> bool:
+    if not result:
+        return False
+    onboard = ((result.get("data") or {}).get("onboardAccount") or {})
+    if onboard or _dict_contains_key_with_value(result, "accessToken"):
+        return False
+    errors = result.get("errors") or []
+    messages = {str(e.get("message") or "") for e in errors if isinstance(e, dict)}
+    if "BROWSER_SIGNUP_EXCEPTION" in messages:
+        return True
+    return (final_url or "").startswith("chrome-error://")
+
+
+def _browser_authorize_billing(
+    page,
+    *,
+    variables: dict[str, Any],
+    mutation: str,
+    context_query: str | None = None,
+    euat: str = "",
+    metadata_id: str = "",
+) -> dict[str, Any]:
+    """Run billing context warmup + authorize inside page context."""
+    result = page.evaluate(
+        """async ({variables, mutation, contextQuery, euat, metadataId}) => {
+            const commonHeaders = {
+              'accept': '*/*',
+              'content-type': 'application/json',
+              'x-app-name': 'checkoutuinodeweb',
+              'x-requested-with': 'fetch',
+              'paypal-client-metadata-id': metadataId || variables.billingAgreementId,
+              'origin': 'https://www.paypal.com',
+              'referer': location.href,
+            };
+            if (euat) {
+              commonHeaders['x-paypal-internal-euat'] = euat;
+            }
+            let contextResult = null;
+            if (contextQuery) {
+              const contextBody = [{
+                operationName: 'BillingAgreementContextQueryForAddCard',
+                variables: {
+                  billingAgreementId: variables.billingAgreementId,
+                  billingAgreementOptions: {},
+                },
+                query: contextQuery,
+              }];
+              const contextResp = await fetch('https://www.paypal.com/graphql/', {
+                method: 'POST',
+                credentials: 'include',
+                headers: commonHeaders,
+                body: JSON.stringify(contextBody),
+              });
+              const contextText = await contextResp.text();
+              contextResult = {
+                status: contextResp.status,
+                text: contextText,
+                contentType: contextResp.headers.get('content-type') || '',
+              };
+            }
+            const body = [{
+              operationName: 'authorize',
+              variables,
+              query: mutation,
+            }];
+            const resp = await fetch('https://www.paypal.com/graphql/', {
+              method: 'POST',
+              credentials: 'include',
+              headers: commonHeaders,
+              body: JSON.stringify(body),
+            });
+            const text = await resp.text();
+            return {
+              status: resp.status,
+              text,
+              contentType: resp.headers.get('content-type') || '',
+              contextResult,
+            };
+        }""",
+        {
+            "variables": variables,
+            "mutation": mutation,
+            "contextQuery": context_query or "",
+            "euat": euat or "",
+            "metadataId": metadata_id or variables.get("billingAgreementId", ""),
+        },
+    )
+    context_result = (result or {}).get("contextResult") or {}
+    if context_result:
+        logger.info(
+            "Browser BillingAgreementContextQueryForAddCard HTTP {} content_type={} bytes={}",
+            context_result.get("status"),
+            context_result.get("contentType"),
+            len(context_result.get("text") or ""),
+        )
+    text_body = (result or {}).get("text") or ""
+    status = (result or {}).get("status")
+    content_type = (result or {}).get("contentType") or ""
+    logger.info(
+        "Browser authorize HTTP {} content_type={} bytes={}",
+        status,
+        content_type,
+        len(text_body),
+    )
+    parsed_context = None
+    try:
+        if context_result and context_result.get("text"):
+            parsed_context = json.loads(context_result.get("text") or "")
+    except Exception:
+        parsed_context = {
+            "errors": [{
+                "message": "BROWSER_CONTEXT_NON_JSON",
+                "errorData": {
+                    "status": context_result.get("status"),
+                    "bytes": len(context_result.get("text") or ""),
+                },
+            }]
+        }
+    try:
+        parsed_authorize = json.loads(text_body)
+    except Exception:
+        parsed_authorize = {
+            "errors": [{
+                "message": "BROWSER_AUTHORIZE_NON_JSON",
+                "errorData": {"status": status, "bytes": len(text_body)},
+            }]
+        }
+    return {
+        "context_result": parsed_context,
+        "authorize_result": parsed_authorize,
+        "status": status,
+    }
+
+
 def solve_with_headed_browser(
     url: str,
     *,
@@ -432,6 +626,11 @@ def solve_with_headed_browser(
     signup_country: str = "BR",
     signup_lang: str = "pt",
     signup_fn_sync_data: str | None = None,
+    authorize_variables: dict[str, Any] | None = None,
+    authorize_mutation: str | None = None,
+    authorize_context_query: str | None = None,
+    authorize_euat: str | None = None,
+    authorize_metadata_id: str | None = None,
 ) -> BrowserAssistResult:
     """Open headed Chromium, wait until challenge clears, return cookies.
 
@@ -522,6 +721,22 @@ def solve_with_headed_browser(
                     last_url = page.url
                     last_html = page.content()
                     last_len = len(last_html or "")
+                    if _is_paypal_unavailable_or_invalid_link_html(last_url, last_html):
+                        cookies = context.cookies()
+                        browser.close()
+                        logger.error(
+                            "Headed browser saw PayPal unavailable/invalid agreement page; "
+                            "stop waiting. url={} bytes={}",
+                            last_url[:160],
+                            last_len,
+                        )
+                        return BrowserAssistResult(
+                            ok=False,
+                            final_url=last_url,
+                            cookies=cookies,
+                            reason="paypal_unavailable_or_invalid_link",
+                            page_bytes=last_len,
+                        )
                     if _page_looks_usable(last_url, last_html):
                         if _is_signup_form_html(last_url, last_html):
                             logger.success(
@@ -649,8 +864,51 @@ def solve_with_headed_browser(
                         "errors": [{"message": "BROWSER_SIGNUP_EXCEPTION", "errorData": {"detail": str(e)}}],
                     }
 
+            authorize_result = None
+            if (
+                usable
+                and authorize_variables
+                and authorize_mutation
+            ):
+                try:
+                    logger.info("Attempting billing authorize from headed browser page context...")
+                    authorize_result = _browser_authorize_billing(
+                        page,
+                        variables=authorize_variables,
+                        mutation=authorize_mutation,
+                        context_query=authorize_context_query,
+                        euat=authorize_euat or "",
+                        metadata_id=authorize_metadata_id or "",
+                    )
+                    logger.info(
+                        "Browser authorize result captured: status={}",
+                        authorize_result.get("status"),
+                    )
+                except Exception as e:
+                    logger.warning("Browser authorize exception: {}", e)
+                    authorize_result = {
+                        "authorize_result": {
+                            "errors": [{
+                                "message": "BROWSER_AUTHORIZE_EXCEPTION",
+                                "errorData": {"detail": str(e)},
+                            }]
+                        }
+                    }
+
             cookies = context.cookies()
             browser.close()
+            if (
+                purpose == "signup_authchallenge"
+                and _signup_result_is_browser_submission_failure(signup_result, last_url)
+            ):
+                return BrowserAssistResult(
+                    ok=False,
+                    final_url=last_url,
+                    cookies=cookies,
+                    reason="signup_browser_submission_failed",
+                    page_bytes=last_len,
+                    signup_result=signup_result,
+                )
             if not usable:
                 return BrowserAssistResult(
                     ok=False,
@@ -683,6 +941,7 @@ def solve_with_headed_browser(
                 otp_challenge_id=otp_challenge_id,
                 otp_state=otp_state,
                 signup_result=signup_result,
+                extra={"authorize": authorize_result} if authorize_result is not None else {},
             )
     except Exception as e:
         logger.error("Headed browser assist failed: {}", e)

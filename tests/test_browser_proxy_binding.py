@@ -1,7 +1,12 @@
 import unittest
 from urllib.parse import quote
 
-from paypal.browser_assist import _mask_proxy_for_log, _proxy_for_playwright
+from paypal.browser_assist import (
+    _is_paypal_unavailable_or_invalid_link_html,
+    _mask_proxy_for_log,
+    _proxy_for_playwright,
+    _signup_result_is_browser_submission_failure,
+)
 
 
 class BrowserProxyBindingTests(unittest.TestCase):
@@ -29,6 +34,64 @@ class BrowserProxyBindingTests(unittest.TestCase):
     def test_empty_proxy_is_off(self):
         self.assertIsNone(_proxy_for_playwright(None))
         self.assertIsNone(_proxy_for_playwright(""))
+
+
+class BrowserPageDetectionTests(unittest.TestCase):
+    def test_portuguese_paypal_unavailable_page_is_terminal(self):
+        html = """
+        <html><title>PayPal</title><body>
+        <div>Parece que as coisas não estão funcionando no momento.</div>
+        </body></html>
+        """
+        self.assertTrue(
+            _is_paypal_unavailable_or_invalid_link_html(
+                "https://www.paypal.com/agreements/approve?ba_token=BA-123&h=1",
+                html,
+            )
+        )
+
+    def test_signup_form_is_not_terminal_error(self):
+        html = """
+        <html><body>
+        <form action="/checkoutweb/signup">
+        <input name="cardnumber"><input name="email">
+        <span>Numero do cartao</span><span>Data de vencimento</span>
+        </form>
+        </body></html>
+        """
+        self.assertFalse(
+            _is_paypal_unavailable_or_invalid_link_html(
+                "https://www.paypal.com/checkoutweb/signup?token=EC-123",
+                html,
+            )
+        )
+
+    def test_browser_signup_exception_is_not_cleared(self):
+        result = {
+            "data": {},
+            "errors": [{"message": "BROWSER_SIGNUP_EXCEPTION"}],
+        }
+        self.assertTrue(
+            _signup_result_is_browser_submission_failure(
+                result,
+                "chrome-error://chromewebdata/",
+            )
+        )
+
+    def test_browser_signup_error_with_access_token_can_continue(self):
+        result = {
+            "data": {"onboardAccount": None},
+            "errors": [{
+                "message": "INSTRUMENT_SHARING_LIMIT_EXCEEDED",
+                "errorData": {"accessToken": "EUAT"},
+            }],
+        }
+        self.assertFalse(
+            _signup_result_is_browser_submission_failure(
+                result,
+                "https://www.paypal.com/checkoutweb/signup?token=EC-123",
+            )
+        )
 
 
 if __name__ == "__main__":

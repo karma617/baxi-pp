@@ -23,7 +23,10 @@ from paypal.models import (
     generate_random_email,
 )
 from paypal.session import PayPalSession, sanitize_for_log
-from paypal.browser_assist import solve_with_headed_browser
+from paypal.browser_assist import (
+    _is_paypal_unavailable_or_invalid_link_html,
+    solve_with_headed_browser,
+)
 from paypal.proxy import build_proxy_config, ProxyConfig
 from paypal.fingerprint import (
     build_fn_sync_data,
@@ -157,6 +160,8 @@ class PayPalFlow:
             return f"http_{status}"
         if status != 200:
             return f"http_{status}"
+        if _is_paypal_unavailable_or_invalid_link_html(str(getattr(resp, "url", "") or ""), html):
+            return "paypal_unavailable_or_invalid_link"
 
         sig = self._phase0_page_signals(resp, html)
         page_len = int(sig["bytes"])
@@ -209,6 +214,12 @@ class PayPalFlow:
         signup_token: str | None = None,
         signup_fn_sync_data: str | None = None,
         bootstrap_url: str | None = None,
+        authorize_variables: dict | None = None,
+        authorize_mutation: str | None = None,
+        authorize_context_query: str | None = None,
+        authorize_euat: str | None = None,
+        authorize_metadata_id: str | None = None,
+        return_failure: bool = False,
     ):
         """Open headed browser for DataDome/authchallenge and import cookies.
 
@@ -250,6 +261,16 @@ class PayPalFlow:
             "purpose": purpose,
             "bootstrap_url": bootstrap_url,
         }
+        if authorize_variables and authorize_mutation:
+            kwargs.update(
+                {
+                    "authorize_variables": authorize_variables,
+                    "authorize_mutation": authorize_mutation,
+                    "authorize_context_query": authorize_context_query,
+                    "authorize_euat": authorize_euat,
+                    "authorize_metadata_id": authorize_metadata_id,
+                }
+            )
         logger.info(
             "Headed browser assist proxy binding purpose={} proxy_label={} proxy_bound={}",
             purpose,
@@ -298,6 +319,8 @@ class PayPalFlow:
                 (result.final_url or "")[:160],
                 result.page_bytes,
             )
+            if return_failure:
+                return result
             return None
         # Refresh tokens from final URL when available.
         final_url = result.final_url or url
@@ -414,6 +437,7 @@ class PayPalFlow:
             max_attempts = max(max_attempts, 3)
         last_status = 0
         last_bytes = 0
+        last_dirty_reason = ""
         used_proxy_urls: set[str] = set()
         current_url = getattr(self.session, "proxy_url", None) or ""
         if current_url:
@@ -441,6 +465,7 @@ class PayPalFlow:
                 return
 
             dirty_reason = self._phase0_dirty_reason(resp, html) or "unknown"
+            last_dirty_reason = dirty_reason
             sig = self._phase0_page_signals(resp, html)
             logger.warning(
                 "Phase0 dirty/blocked on attempt {}/{}: status={} bytes={} reason={} "
@@ -459,7 +484,29 @@ class PayPalFlow:
             )
             # Prefer headed browser on the current proxy before rotating away.
             assist_url = f"https://www.paypal.com/agreements/approve?ba_token={self.ba_token}"
-            if self._run_headed_browser_assist(assist_url, purpose="phase0_datadome"):
+            assist = None
+            if dirty_reason == "paypal_unavailable_or_invalid_link":
+                logger.warning(
+                    "Phase0 saw PayPal unavailable/invalid agreement page; "
+                    "skip headed-browser wait and rotate/fail fast."
+                )
+            else:
+                assist = self._run_headed_browser_assist(
+                    assist_url,
+                    purpose="phase0_datadome",
+                    return_failure=True,
+                )
+                if (
+                    assist
+                    and not getattr(assist, "ok", False)
+                    and getattr(assist, "reason", "") == "paypal_unavailable_or_invalid_link"
+                ):
+                    last_dirty_reason = "paypal_unavailable_or_invalid_link"
+                    logger.warning(
+                        "Headed browser reached PayPal unavailable/invalid agreement page; "
+                        "rotate/fail fast instead of waiting for manual challenge."
+                    )
+            if assist and getattr(assist, "ok", False):
                 # Re-load via HTTP with imported cookies; if still dirty, continue rotate.
                 try:
                     self._phase0_reset_partial_state()
@@ -551,6 +598,13 @@ class PayPalFlow:
                 )
             logger.info("Retrying Phase0 with proxy: {}", self.proxy_config.label)
 
+        if last_dirty_reason == "paypal_unavailable_or_invalid_link":
+            raise RuntimeError(
+                f"Phase0 stopped on PayPal unavailable/invalid agreement page: "
+                f"status={last_status} bytes={last_bytes}. The BA approve link is "
+                "expired/unavailable for this session; replace the BA token or retry "
+                "with a fresh task/proxy."
+            )
         raise RuntimeError(
             f"Phase0 blocked/dirty session: status={last_status} bytes={last_bytes}. "
             "Got soft-block/DataDome shell instead of BA page. Use multi-line "
@@ -699,6 +753,24 @@ class PayPalFlow:
         return_url = ((authorize_data.get("returnURL") or {}).get("href") or "").strip()
         ba_token = (authorize_data.get("billingAgreementToken") or "").strip()
         return return_url, ba_token, authorize_data
+
+    @staticmethod
+    def _parse_billing_context_payload(context_result) -> tuple[str, str, str, dict]:
+        """Return (return_url, ba_token, user_id, billing_context)."""
+        result_obj = context_result[0] if isinstance(context_result, list) else context_result
+        context = (
+            ((result_obj or {}).get("data") or {})
+            .get("billing", {})
+            .get("billingAgreementContext")
+            or {}
+        )
+        if not isinstance(context, dict):
+            return "", "", "", {}
+        return_url = ((context.get("returnURL") or {}).get("href") or "").strip()
+        ba_token = (context.get("billingAgreementToken") or "").strip()
+        buyer = context.get("buyer") or {}
+        user_id = (buyer.get("userId") or "").strip() if isinstance(buyer, dict) else ""
+        return return_url, ba_token, user_id, context
 
     def _build_pay_billing_url(self) -> str:
         import urllib.parse as _urlparse
@@ -855,6 +927,81 @@ class PayPalFlow:
         except Exception as e:
             logger.warning("Phase4 recovery /pay/billing failed: {}", e)
             return None
+
+    def _phase4_billing_context_warm(
+        self,
+        billing_agreement_id: str,
+        referer: str,
+    ) -> dict:
+        """Warm billing context with EUAT and keep buyer metadata for authorize."""
+        headers = {
+            "Accept": "*/*",
+            "Origin": "https://www.paypal.com",
+            "Referer": referer,
+            "X-App-Name": "checkoutuinodeweb",
+            "X-Requested-With": "fetch",
+            "PayPal-Client-Metadata-Id": self.state.paypal_client_metadata_id
+            or billing_agreement_id,
+        }
+        if self.state.euat_token:
+            headers["X-PayPal-Internal-EUAT"] = self.state.euat_token
+
+        logger.info(
+            "Phase4: BillingAgreementContextQueryForAddCard billingAgreementId={}",
+            sanitize_for_log({"billingAgreementId": billing_agreement_id})[
+                "billingAgreementId"
+            ],
+        )
+        try:
+            context_result = self.session.graphql(
+                "BillingAgreementContextQueryForAddCard",
+                BILLING_AGREEMENT_CONTEXT_QUERY,
+                {
+                    "billingAgreementId": billing_agreement_id,
+                    "billingAgreementOptions": {},
+                },
+                extra_headers=headers,
+                batched=True,
+                endpoint="https://www.paypal.com/graphql/",
+            )
+        except Exception as e:
+            logger.error("BR billing context query failed: {}", e)
+            return {
+                "status": "error",
+                "error": f"billing context query failed: {e}",
+                "billingAgreementId": billing_agreement_id,
+                "euat_present": bool(self.state.euat_token),
+            }
+
+        logger.info(
+            "Billing context warm result (sanitized): {}",
+            json.dumps(sanitize_for_log(context_result), ensure_ascii=False, indent=2)[:1200],
+        )
+        return_url, ba_token_resp, user_id, context = self._parse_billing_context_payload(
+            context_result
+        )
+        if user_id:
+            self.state.user_id = user_id
+        if not return_url:
+            logger.warning("Billing context warm did not return returnURL")
+            return {
+                "status": "error",
+                "error": "billing context did not return returnURL",
+                "raw_response": context_result,
+                "billingAgreementId": billing_agreement_id,
+                "euat_present": bool(self.state.euat_token),
+                "user_id": self.state.user_id,
+            }
+
+        logger.info("Billing context warm returned merchant returnURL; waiting for authorize")
+        return {
+            "status": "ok",
+            "ba_token": ba_token_resp or self.ba_token,
+            "user_id": self.state.user_id,
+            "return_url": return_url,
+            "payment_action": context.get("paymentAction") if isinstance(context, dict) else None,
+            "raw_response": context_result,
+        }
 
     def _extract_modxo_action_ids(self, html: str, base_url: str):
         """Extract Next server-action IDs from ModXO JS chunks.
@@ -2346,7 +2493,10 @@ class PayPalFlow:
 
     def _hermes_reason_param(self, errors: list[dict] | None = None) -> str:
         import base64
-        code = self._signup_card_reason_code(errors)
+        if (self.address.country or self.state.country or "").upper() == "BR":
+            code = "R_ERROR"
+        else:
+            code = self._signup_card_reason_code(errors)
         self.state.signup_contingency_reason = code
         return base64.b64encode(code.encode("utf-8")).decode("ascii")
 
@@ -2423,6 +2573,15 @@ class PayPalFlow:
         base = "https://www.paypal.com/webapps/hermes?"
         return base + _urlparse.urlencode(entry), base + _urlparse.urlencode(review)
 
+    @staticmethod
+    def _build_billing_review_url(hermes_review_url: str) -> str:
+        """Client-side Hagrid review route used before billing.authorize."""
+        base, _fragment = (hermes_review_url or "").split("#", 1) if "#" in (hermes_review_url or "") else (hermes_review_url, "")
+        joiner = "&" if "?" in base else "?"
+        if "billingLite=" not in base:
+            base = f"{base}{joiner}billingLite=1"
+        return f"{base}#/billingweb/review"
+
     def _hermes_page_is_bound(self, resp, html: str = "") -> bool:
         """True only when Hermes HTML looks like a real billing shell, not 403/captcha shell."""
         status = getattr(resp, "status_code", 0) or 0
@@ -2484,6 +2643,9 @@ class PayPalFlow:
             }
 
         hermes_base_url, hermes_review_url = self._build_hermes_urls()
+        billing_review_url = self._build_billing_review_url(hermes_review_url)
+        billing_review_referer = billing_review_url.split("#", 1)[0]
+        is_br_flow = (self.address.country or self.state.country or "").upper() == "BR"
         # Keep review referer as the contingency shell URL (no forced billingLite).
         review_referer = hermes_review_url
         review_url = hermes_review_url
@@ -2619,8 +2781,51 @@ class PayPalFlow:
             }
 
 
+        ba_token_resp = self.ba_token
+        browser_authorize_result = None
+        if is_br_flow:
+            try:
+                logger.info("Phase4 BR step1c: open Hermes billing review route before authorize...")
+                assist = self._run_headed_browser_assist(
+                    billing_review_url,
+                    purpose="phase4_br_billing_review",
+                    bootstrap_url=signup_referer,
+                    authorize_variables={
+                        "billingAgreementId": billing_agreement_id,
+                        "fundingPreference": {"balancePreference": "OPT_OUT"},
+                        "legalAgreements": {},
+                    },
+                    authorize_mutation=AUTHORIZE_BILLING_MUTATION,
+                    authorize_context_query=BILLING_AGREEMENT_CONTEXT_QUERY,
+                    authorize_euat=self.state.euat_token,
+                    authorize_metadata_id=self.state.paypal_client_metadata_id
+                    or billing_agreement_id,
+                )
+                browser_authorize_result = (
+                    (getattr(assist, "extra", {}) or {}).get("authorize") or {}
+                ).get("authorize_result") if assist else None
+                if assist and getattr(assist, "final_url", ""):
+                    final_url = (assist.final_url or "").strip()
+                    if "webapps/hermes" in final_url:
+                        referer = final_url.split("#", 1)[0]
+                    else:
+                        referer = billing_review_referer
+                else:
+                    referer = billing_review_referer
+            except Exception as e:
+                logger.warning("BR billing review browser bind failed: {}", e)
+                referer = billing_review_referer
+
+            context_warm = self._phase4_billing_context_warm(
+                billing_agreement_id,
+                referer,
+            )
+            if context_warm.get("ba_token"):
+                ba_token_resp = context_warm["ba_token"]
+
         common_headers = {
             "Accept": "*/*",
+            "Origin": "https://www.paypal.com",
             "Referer": referer,
             "X-App-Name": "checkoutuinodeweb",
             "X-Requested-With": "fetch",
@@ -2654,11 +2859,34 @@ class PayPalFlow:
             ],
         )
 
-        ba_token_resp = self.ba_token
         return_url = ""
-        auth_result = None
+        auth_result = browser_authorize_result
         max_authorize_attempts = 2
-        for auth_attempt in range(1, max_authorize_attempts + 1):
+        if browser_authorize_result:
+            logger.info(
+                "authorize result from browser page context (sanitized): {}",
+                _json.dumps(
+                    sanitize_for_log(browser_authorize_result),
+                    ensure_ascii=False,
+                    indent=2,
+                )[:800],
+            )
+            try:
+                parsed_return, parsed_ba, authorize_data = self._parse_authorize_payload(
+                    browser_authorize_result
+                )
+                if parsed_return:
+                    return_url = parsed_return
+                if parsed_ba:
+                    ba_token_resp = parsed_ba
+                buyer = (authorize_data or {}).get("buyer") or {}
+                if buyer.get("userId"):
+                    self.state.user_id = buyer["userId"]
+            except Exception as e:
+                logger.warning("Failed to parse browser authorize response: {}", e)
+
+        start_attempt = 1 if not return_url else max_authorize_attempts + 1
+        for auth_attempt in range(start_attempt, max_authorize_attempts + 1):
             try:
                 auth_result = self.session.graphql(
                     "authorize",
@@ -2720,11 +2948,11 @@ class PayPalFlow:
                 pass
             try:
                 assist = self._run_headed_browser_assist(
-                    hermes_review_url,
+                    billing_review_url if is_br_flow else hermes_review_url,
                     purpose="phase4_hermes_retry",
                     bootstrap_url=signup_referer,
                 )
-                rebind_url = hermes_review_url
+                rebind_url = billing_review_referer if is_br_flow else hermes_review_url
                 if assist and getattr(assist, "final_url", ""):
                     final_url = (assist.final_url or "").strip()
                     if "webapps/hermes" in final_url or "/pay/billing" in final_url:
@@ -2755,6 +2983,13 @@ class PayPalFlow:
                 buyer_from_hermes = self._extract_buyer_id_from_html(html)
                 if buyer_from_hermes:
                     self.state.user_id = buyer_from_hermes
+                if is_br_flow:
+                    context_warm = self._phase4_billing_context_warm(
+                        billing_agreement_id,
+                        common_headers["Referer"],
+                    )
+                    if context_warm.get("ba_token"):
+                        ba_token_resp = context_warm["ba_token"]
             except Exception as e:
                 logger.warning("Hermes rebind before authorize retry failed: {}", e)
 
@@ -2784,15 +3019,16 @@ class PayPalFlow:
             logger.error(
                 "authorize failed with BUYER_NOT_SET; refusing ContextQuery fake-success fallback"
             )
-            recovery = self._phase4_pay_billing_recovery(referer)
-            if recovery and recovery.get("status") == "success":
-                return recovery
+            if not is_br_flow:
+                recovery = self._phase4_pay_billing_recovery(referer)
+                if recovery and recovery.get("status") == "success":
+                    return recovery
             return {
                 "status": "error",
                 "error": (
                     "authorize BUYER_NOT_SET after Hermes bind/retry; "
-                    "buyer session not authorized. Reopen with cleaner sticky proxy "
-                    "or complete captcha in headed browser during Phase4."
+                    "buyer session not authorized. For BR, ContextQuery returnURL "
+                    "is diagnostic only and is not treated as success."
                 ),
                 "raw_response": auth_result,
                 "euat_present": bool(self.state.euat_token),

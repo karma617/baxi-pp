@@ -543,6 +543,35 @@ query BillingAgreementContextQueryForAddCard($billingAgreementId: String!, $bill
         href
         __typename
       }
+      buyer {
+        name {
+          givenName
+          familyName
+          __typename
+        }
+        email {
+          stringValue
+          __typename
+        }
+        userId
+        eligibleToHoldBalance
+        walletPreference
+        addresses {
+          addressId
+          line1
+          line2
+          city
+          postalCode
+          country
+          state
+          fullAddress
+          isSelected
+          isDefaultBilling
+          type
+          __typename
+        }
+        __typename
+      }
       __typename
     }
     __typename

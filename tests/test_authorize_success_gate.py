@@ -78,7 +78,7 @@ class AuthorizeSuccessGateTests(unittest.TestCase):
         self.assertEqual(ba, "BA-OK")
         self.assertEqual(data["buyer"]["userId"], "BUYER1")
 
-    def test_buyer_not_set_does_not_use_context_query_fake_success(self):
+    def test_br_phase4_requires_authorize_after_context_warm(self):
         flow = _make_flow()
 
         class FakeSession:
@@ -92,19 +92,25 @@ class AuthorizeSuccessGateTests(unittest.TestCase):
             def graphql(self, operation_name, query, variables, **kwargs):
                 self.graphql_ops.append(operation_name)
                 if operation_name == "authorize":
+                    if variables["billingAgreementId"] != "EC-TEST123456":
+                        raise AssertionError("unexpected billingAgreementId")
                     return [
                         {
-                            "errors": [
-                                {
-                                    "data": {"contingency": "BUYER_NOT_SET"},
-                                    "message": "400",
-                                    "path": ["billing", "authorize"],
+                            "data": {
+                                "billing": {
+                                    "authorize": {
+                                        "billingAgreementToken": "BA-AUTH",
+                                        "returnURL": {
+                                            "href": "https://merchant.example/authorize-return"
+                                        },
+                                        "buyer": {"userId": "BUYER1"},
+                                    }
                                 }
-                            ],
-                            "data": {"billing": {"authorize": None}},
+                            }
                         }
                     ]
-                # Context query must not be used as success fallback anymore.
+                if operation_name != "BillingAgreementContextQueryForAddCard":
+                    raise AssertionError(f"unexpected graphql op: {operation_name}")
                 return [
                     {
                         "data": {
@@ -114,6 +120,7 @@ class AuthorizeSuccessGateTests(unittest.TestCase):
                                     "returnURL": {
                                         "href": "https://merchant.example/context-return"
                                     },
+                                    "buyer": {"userId": "BUYER1"},
                                 }
                             }
                         }
@@ -151,19 +158,21 @@ class AuthorizeSuccessGateTests(unittest.TestCase):
 
         with (
             patch.object(flow, "_run_headed_browser_assist", return_value=None),
-            patch.object(flow, "_phase4_pay_billing_recovery", return_value=None),
             patch("paypal.flow.send_analytics_ts"),
         ):
             result = flow._phase4_authorize()
 
-        self.assertEqual(result["status"], "error")
-        self.assertIn("BUYER_NOT_SET", result["error"])
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["return_url"], "https://merchant.example/authorize-return")
+        self.assertEqual(result["user_id"], "BUYER1")
+        self.assertEqual(result["ba_token"], "BA-AUTH")
+        self.assertIn("BillingAgreementContextQueryForAddCard", fake.graphql_ops)
         self.assertIn("authorize", fake.graphql_ops)
-        self.assertNotIn(
-            "BillingAgreementContextQueryForAddCard",
-            fake.graphql_ops,
-        )
         flow.close()
+
+    def test_br_hermes_reason_matches_har_r_error(self):
+        flow = _make_flow()
+        self.assertEqual(flow._hermes_reason_param(), "Ul9FUlJPUg==")
 
 
 if __name__ == "__main__":
