@@ -892,6 +892,7 @@ Hermes 页面预加载保留以热身 session cookie。
 - .\.venv\Scripts\python.exe -m unittest tests.test_authorize_success_gate -v：7 passed
 - .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：6 passed
 - 通过 start.bat 重启网页服务后访问 http://127.0.0.1:18765/：HTTP 200
+- 通过 start.bat 重启网页服务后访问 http://127.0.0.1:18765/：HTTP 200
 
 ### Notes
 改动文件：
@@ -899,6 +900,24 @@ Hermes 页面预加载保留以热身 session cookie。
 - tests/test_browser_proxy_binding.py：新增浏览器 SignUp 异常不算成功、带 accessToken 可继续的单测
 - progress.md：追加本轮施工记录
 回滚：当前工作树包含前序未提交改动，不建议整文件 checkout；如需回滚本轮，仅反向移除 `_signup_result_is_browser_submission_failure`、`_dict_contains_key_with_value`、浏览器 SignUp 失败返回分支和对应两条测试。
+
+## 2026-07-16 - Task: Phase4 authorize 优先页面原生触发
+
+### What was done
+BR Phase4 的浏览器 authorize 改为三段式：先在 Hagrid billing review 页面监听 GraphQL 响应并点击可见主 CTA，尽量让页面原生触发 `billing.authorize`；如果没有捕获到原生 authorize，再用同一 BrowserContext 的 request 发送 GraphQL；最后才保留原来的页面 `fetch` 作为兜底。这样可以减少 `window.fetch` 被 `webcaptcha/ngrlCaptcha` hook 后直接 `Failed to fetch` 的情况，同时每个阶段都有短超时，避免无效等待。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile paypal\browser_assist.py paypal\flow.py paypal\graphql.py web.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_browser_proxy_binding -v：8 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_authorize_success_gate -v：7 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：6 passed
+
+### Notes
+改动文件：
+- paypal/browser_assist.py：新增 Phase4 native CTA 点击、GraphQL 响应捕获、BrowserContext request 兜底和返回 URL合成
+- docs/hermes-session-bind.md：同步 Phase4 authorize 新顺序和日志观察点
+- progress.md：追加本轮施工记录
+回滚：当前工作树包含前序未提交改动，不建议整文件 checkout；如需回滚本轮，仅反向移除 `_browser_authorize_billing_via_native_click`、`_click_native_billing_cta`、`_browser_graphql_request_context`、相关辅助函数，以及 `_browser_authorize_billing` 中的 native/request-context 优先分支。
 
 ## 2026-07-16 - Task: BR Phase4 改为浏览器上下文 authorize
 

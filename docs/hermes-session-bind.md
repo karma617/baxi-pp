@@ -23,7 +23,7 @@ SignUp 出现卡 contingency（如 `CARD_GENERIC_ERROR` / sharing limit）且带
 ## 当前代码行为
 - 保存 `signup_contingency_reason`
 - BR Phase4 按上述 URL 绑定，Hermes `reason` 对齐 BR HAR 的 `R_ERROR`
-- BR 在 authorize 前打开 `billingLite=1#/billingweb/review`，并优先在有头浏览器页面上下文里执行 `BillingAgreementContextQueryForAddCard + authorize`
+- BR 在 authorize 前打开 `billingLite=1#/billingweb/review`，优先点击页面内 Hagrid 主 CTA 并监听页面自身 GraphQL authorize；若未捕获原生 authorize，再降级到同一 BrowserContext 的 request GraphQL，最后才使用页面 `fetch`
 - httpx authorize 只作为浏览器 authorize 未拿到 `returnURL` 后的 fallback
 - 仅当 status 正常且页面足够大/非 captcha 时记 `bound=true`
 - 403/小页会告警，并可尝试 headed browser 再绑
@@ -33,6 +33,9 @@ SignUp 出现卡 contingency（如 `CARD_GENERIC_ERROR` / sharing limit）且带
 - `Phase4 step1: GET Hermes contingency shell reason=...`
 - `Hermes review bound: status=... bound=true/false`
 - `Phase4 BR step1c: open Hermes billing review route before authorize...`
+- `Browser native authorize clicked CTA: ...`
+- `Browser native captured authorize HTTP ...`
+- `Browser authorize using mode=native_click|native_navigation|browser_request_context`
 - `Browser BillingAgreementContextQueryForAddCard HTTP ...`
 - `Browser authorize HTTP ...`
 - `authorize result attempt ...`

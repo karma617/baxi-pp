@@ -484,6 +484,261 @@ def _signup_result_is_browser_submission_failure(result: dict[str, Any] | None, 
     return (final_url or "").startswith("chrome-error://")
 
 
+def _parse_browser_graphql_text(text: str, *, message: str, status: int | None = None) -> Any:
+    try:
+        return json.loads(text or "")
+    except Exception:
+        return {
+            "errors": [{
+                "message": message,
+                "errorData": {"status": status, "bytes": len(text or "")},
+            }]
+        }
+
+
+def _authorize_payload_has_return_url(payload: Any) -> bool:
+    items = payload if isinstance(payload, list) else [payload]
+    for item in items:
+        auth = (
+            ((item or {}).get("data") or {})
+            .get("billing", {})
+            .get("authorize")
+            or {}
+        )
+        if isinstance(auth, dict) and ((auth.get("returnURL") or {}).get("href") or ""):
+            return True
+    return False
+
+
+def _synthetic_authorize_from_navigation(url: str, billing_agreement_id: str) -> dict[str, Any] | None:
+    if not url:
+        return None
+    low = url.lower()
+    if "paypal.com/" in low:
+        return None
+    if "status=success" not in low and "pm-redirects.stripe.com/return" not in low:
+        return None
+    return {
+        "context_result": None,
+        "authorize_result": [{
+            "data": {
+                "billing": {
+                    "authorize": {
+                        "billingAgreementToken": billing_agreement_id,
+                        "returnURL": {"href": url},
+                    }
+                }
+            }
+        }],
+        "status": 200,
+        "mode": "native_navigation",
+    }
+
+
+def _click_native_billing_cta(page) -> str:
+    """Click the visible Hagrid primary CTA instead of calling fetch directly."""
+    allow = re.compile(
+        r"(agree|continue|authorize|authorise|pay|confirm|"
+        r"concordar|continuar|autorizar|pagar|confirmar)",
+        re.I,
+    )
+    deny = re.compile(r"(cancel|back|voltar|cancelar|help|ajuda|privacy|legal)", re.I)
+    locators = [
+        page.get_by_role("button", name=allow),
+        page.get_by_role("link", name=allow),
+        page.locator(
+            "button, [role=button], input[type=submit], "
+            "[data-testid*=continue], [data-testid*=submit], "
+            "[data-testid*=approve], [data-testid*=primary]"
+        ),
+    ]
+    for locator in locators:
+        try:
+            count = min(locator.count(), 12)
+        except Exception:
+            count = 1
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                text = " ".join(
+                    filter(
+                        None,
+                        [
+                            item.inner_text(timeout=800) if item.count() else "",
+                            item.get_attribute("aria-label", timeout=800) or "",
+                            item.get_attribute("value", timeout=800) or "",
+                            item.get_attribute("data-testid", timeout=800) or "",
+                        ],
+                    )
+                )
+                if deny.search(text or ""):
+                    continue
+                if text and not allow.search(text):
+                    continue
+                if not item.is_visible(timeout=800) or not item.is_enabled(timeout=800):
+                    continue
+                item.scroll_into_view_if_needed(timeout=1200)
+                item.click(timeout=2500)
+                return (text or "matched_primary_cta").strip()[:120]
+            except Exception:
+                continue
+    return ""
+
+
+def _browser_authorize_billing_via_native_click(
+    page,
+    *,
+    billing_agreement_id: str,
+) -> dict[str, Any] | None:
+    captured: dict[str, Any] = {"authorize": None, "context": None}
+
+    def on_response(resp):
+        try:
+            if "/graphql" not in (resp.url or ""):
+                return
+            req = resp.request
+            post = req.post_data or ""
+            if (
+                "authorize" not in post
+                and "BillingAgreementContextQueryForAddCard" not in post
+            ):
+                return
+            text = resp.text()
+            parsed = _parse_browser_graphql_text(
+                text,
+                message="BROWSER_NATIVE_GRAPHQL_NON_JSON",
+                status=resp.status,
+            )
+            if "BillingAgreementContextQueryForAddCard" in post:
+                captured["context"] = parsed
+                logger.info(
+                    "Browser native captured BillingAgreementContextQueryForAddCard HTTP {} bytes={}",
+                    resp.status,
+                    len(text or ""),
+                )
+            if "authorize" in post:
+                captured["authorize"] = parsed
+                logger.info(
+                    "Browser native captured authorize HTTP {} bytes={}",
+                    resp.status,
+                    len(text or ""),
+                )
+        except Exception as e:
+            logger.debug("Browser native response capture skipped: {}", e)
+
+    page.on("response", on_response)
+    try:
+        page.wait_for_timeout(1200)
+        clicked = _click_native_billing_cta(page)
+        if not clicked:
+            logger.warning("Browser native authorize: no clickable billing CTA found")
+            return None
+        logger.info("Browser native authorize clicked CTA: {}", clicked)
+        for _ in range(10):
+            if captured.get("authorize"):
+                break
+            nav_result = _synthetic_authorize_from_navigation(page.url, billing_agreement_id)
+            if nav_result:
+                logger.success("Browser native authorize reached merchant return URL")
+                return nav_result
+            page.wait_for_timeout(700)
+        nav_result = _synthetic_authorize_from_navigation(page.url, billing_agreement_id)
+        if nav_result:
+            logger.success("Browser native authorize reached merchant return URL")
+            return nav_result
+        if captured.get("authorize"):
+            return {
+                "context_result": captured.get("context"),
+                "authorize_result": captured.get("authorize"),
+                "status": 200,
+                "mode": "native_click",
+            }
+        return None
+    finally:
+        try:
+            page.remove_listener("response", on_response)
+        except Exception:
+            pass
+
+
+def _browser_graphql_request_context(
+    page,
+    *,
+    variables: dict[str, Any],
+    mutation: str,
+    context_query: str | None = None,
+    euat: str = "",
+    metadata_id: str = "",
+) -> dict[str, Any]:
+    common_headers = {
+        "accept": "*/*",
+        "content-type": "application/json",
+        "x-app-name": "checkoutuinodeweb",
+        "x-requested-with": "fetch",
+        "paypal-client-metadata-id": metadata_id or variables.get("billingAgreementId", ""),
+        "origin": "https://www.paypal.com",
+        "referer": page.url,
+    }
+    if euat:
+        common_headers["x-paypal-internal-euat"] = euat
+
+    context_result = None
+    if context_query:
+        context_body = [{
+            "operationName": "BillingAgreementContextQueryForAddCard",
+            "variables": {
+                "billingAgreementId": variables["billingAgreementId"],
+                "billingAgreementOptions": {},
+            },
+            "query": context_query,
+        }]
+        context_resp = page.context.request.post(
+            "https://www.paypal.com/graphql/",
+            data=json.dumps(context_body),
+            headers=common_headers,
+            timeout=12000,
+        )
+        context_text = context_resp.text()
+        logger.info(
+            "Browser request-context BillingAgreementContextQueryForAddCard HTTP {} bytes={}",
+            context_resp.status,
+            len(context_text or ""),
+        )
+        context_result = _parse_browser_graphql_text(
+            context_text,
+            message="BROWSER_CONTEXT_NON_JSON",
+            status=context_resp.status,
+        )
+
+    body = [{
+        "operationName": "authorize",
+        "variables": variables,
+        "query": mutation,
+    }]
+    resp = page.context.request.post(
+        "https://www.paypal.com/graphql/",
+        data=json.dumps(body),
+        headers=common_headers,
+        timeout=12000,
+    )
+    text = resp.text()
+    logger.info(
+        "Browser request-context authorize HTTP {} bytes={}",
+        resp.status,
+        len(text or ""),
+    )
+    return {
+        "context_result": context_result,
+        "authorize_result": _parse_browser_graphql_text(
+            text,
+            message="BROWSER_AUTHORIZE_NON_JSON",
+            status=resp.status,
+        ),
+        "status": resp.status,
+        "mode": "browser_request_context",
+    }
+
+
 def _browser_authorize_billing(
     page,
     *,
@@ -494,6 +749,31 @@ def _browser_authorize_billing(
     metadata_id: str = "",
 ) -> dict[str, Any]:
     """Run billing context warmup + authorize inside page context."""
+    native_result = _browser_authorize_billing_via_native_click(
+        page,
+        billing_agreement_id=variables.get("billingAgreementId", ""),
+    )
+    if native_result and (
+        _authorize_payload_has_return_url(native_result.get("authorize_result"))
+        or native_result.get("authorize_result")
+    ):
+        logger.info("Browser authorize using mode={}", native_result.get("mode"))
+        return native_result
+
+    try:
+        request_result = _browser_graphql_request_context(
+            page,
+            variables=variables,
+            mutation=mutation,
+            context_query=context_query,
+            euat=euat,
+            metadata_id=metadata_id,
+        )
+        logger.info("Browser authorize using mode={}", request_result.get("mode"))
+        return request_result
+    except Exception as e:
+        logger.warning("Browser request-context authorize failed; falling back to page fetch: {}", e)
+
     result = page.evaluate(
         """async ({variables, mutation, contextQuery, euat, metadataId}) => {
             const commonHeaders = {
