@@ -1,0 +1,4 @@
+usage: main.py [-h] --ba-token BA_TOKEN --phone PHONE [--debug]
+               [--max-card-attempts MAX_CARD_ATTEMPTS] [--country {BR,US,BA}]
+               [--proxy | --no-proxy] [--proxy-index PROXY_INDEX]
+main.py: error: the following arguments are required: --ba-token, --phone

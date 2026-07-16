@@ -1,0 +1,407 @@
+21:20:37 | INFO     | DEBUG 日志已在网页端关闭；设置 PAYPAL_WEB_ALLOW_DEBUG_LOGS=1 才允许显示。
+21:20:37 | INFO     | Web UI running: http://localhost:8080
+----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 53779)
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\http\server.py", line 447, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\http\server.py", line 415, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\socket.py", line 723, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+----------------------------------------
+21:43:25 | INFO     | Web job started: c41ac5d9ba17
+21:43:25 | INFO     | Proxy: http://***:***@gate.kookeey.info:1000
+21:43:25 | INFO     | Country: BR
+21:43:25 | INFO     | User: Amanda Almeida
+21:43:25 | INFO     | Email: cl***n***@gmail.com
+21:43:25 | INFO     | Phone: *********1212
+21:43:25 | INFO     | Address generated: Centro, Rio de Janeiro-RJ
+21:43:26 | INFO     | HTTP outbound proxy: http://***:***@gate.kookeey.info:1000
+21:43:26 | INFO     | === PayPal Billing Agreement Flow ===
+21:43:26 | INFO     | BA Token: <redacted>
+21:43:26 | INFO     | Email: cl***n***@gmail.com
+21:43:26 | INFO     | Phone: *********1212
+21:43:26 | INFO     | Proxy: http://***:***@gate.kookeey.info:1000
+21:43:26 | INFO     | --- Phase 0: Initial page load ---
+21:43:30 | INFO     | Page loaded: 200, 44408 bytes
+21:43:30 | INFO     | Context ID: xo_ctx_EC-81M50877NJ865190X
+21:43:30 | INFO     | SSRT: *********9126
+21:43:30 | INFO     | EC Token (from initial approval context): EC-81M...190X
+21:43:30 | INFO     | --- Phase 1: Risk control signals ---
+21:43:30 | INFO     | Sending device fingerprint p1 app_id=IWC_NEXT_CHECKOUT...
+21:43:33 | INFO     | Sending device fingerprint p2 app_id=IWC_NEXT_CHECKOUT...
+21:43:34 | INFO     | Sending device fingerprint w app_id=IWC_NEXT_CHECKOUT...
+21:43:35 | INFO     | Sending Tealeaf session data...
+21:43:40 | INFO     | Risk control signals sent
+21:43:40 | INFO     | --- Phase 2: Create account flow ---
+21:43:40 | WARNING  | Browser-like ModXO server-action path failed: missing dynamic ModXO Next-Action ids
+21:43:42 | INFO     | Loading checkout signup app: https://www.paypal.com/checkoutweb/signup?ssrt=*********9126&ul=1&modxo_redirect_reason=guest_user&locale.x=pt_BR&country.x=BR&ba_token=<redacted>&token=<redacted>&rcache=1&cookieBannerVariant=hidden
+21:43:43 | INFO     | Checkout signup app loaded: 403 bytes=7707
+21:43:43 | INFO     | Content identifier: BR:pt:759169e5b7de230616d673bd3498ac79:compliance.signupTerms
+21:43:43 | INFO     | Sending Tealeaf session data...
+21:43:46 | INFO     | Sending device fingerprint p1 app_id=CHECKOUTUINODEWEB_ONBOARDING_LITE...
+21:43:49 | INFO     | Sending device fingerprint p2 app_id=CHECKOUTUINODEWEB_ONBOARDING_LITE...
+21:43:50 | INFO     | Sending device fingerprint w app_id=CHECKOUTUINODEWEB_ONBOARDING_LITE...
+21:43:51 | INFO     | Sending checkout session GraphQL queries...
+21:43:53 | INFO     | GraphQL DeferredFeature HTTP 200 bytes=1964 paypal_debug_id=f3127249b8917
+21:43:55 | INFO     | GraphQL CheckoutSessionDataQuery HTTP 200 bytes=1415 paypal_debug_id=f744686661b2e
+21:43:56 | INFO     | GraphQL GriffinMetadataQuery HTTP 200 bytes=32851 paypal_debug_id=f36709222a938
+21:43:57 | INFO     | GraphQL SupportedFundingSourcesQuery HTTP 200 bytes=743 paypal_debug_id=f5462489f7b7c
+21:43:59 | INFO     | GraphQL AddressAutocompleteFromPostalCodeQuery HTTP 200 bytes=524 paypal_debug_id=f354149b7be1a
+21:43:59 | INFO     | Address normalized: Rua da Assembléia, 10, Centro, Rio de Janeiro RJ
+21:43:59 | INFO     | --- Phase 3: Signup form + 2FA ---
+21:43:59 | INFO     | Sending Tealeaf session data...
+21:44:01 | INFO     | OTP challenge (idapps/graphql) HTTP 200 bytes=7579
+21:44:01 | INFO     | Step 1: Initiating 2FA phone confirmation for *********1212...
+21:44:03 | INFO     | GraphQL InitiateRiskBasedTwoFactorPhoneConfirmationMutation HTTP 200 bytes=7645 paypal_debug_id=f2727359327c1
+21:44:03 | WARNING  | GraphQL InitiateRiskBasedTwoFactorPhoneConfirmationMutation returned non-JSON response: status=200 paypal_debug_id=f2727359327c1 body_len=7642 - attempting token extraction
+21:44:03 | ERROR    | GraphQL InitiateRiskBasedTwoFactorPhoneConfirmationMutation non-JSON response body (first 2000): <!DOCTYPE html>
+<!--[if lt IE 9]><html lang="en" class="no-js lower-than-ie9" ><![endif]-->
+<!--[if lt IE 10]><html lang="en" class="no-js lower-than-ie10" ><![endif]-->
+<!--[if !IE]>--><html lang="en" class="no-js" ><!--<![endif]-->
+    <head>
+        
+                <script src="https://www.paypalobjects.com/pa/js/pa.js"></script>
+                    
+                
+                <script nonce="4BzyFvzXV500CAIfHgZaJ+czuHSeMn/dHs78fkAJJ/4GXWtU">
+                    (function(){
+                        if(typeof PAYPAL.analytics != "undefined"){
+                            PAYPAL.core = PAYPAL.core || {};
+                            PAYPAL.core['pta'] = PAYPAL.analytics.setup({data:'pgrp=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&page=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&qual=&comp=authchallengenodeweb&tsrce=checkoutuinodeweb_weasley&cu=0&ef_policy=ccpa&c_prefs=&pxpguid=6604a84619f647e0b8e1ec86fde64232&pgst=*********3131&calc=f2727359327c1&csci=fa8130022e91453c8e32b2a1c9a16254&nsid=OyNvjPnMqy4M6T1DN3ELmI1QGKg_SY9w&rsta=pt_BR&ccpg=BR&pgtf=Nodejs&s=ci&env=live&xe=114211&xt=176915', url:'https://t.paypal.com/ts'});
+                        }
+                    }());
+                </script>
+                <noscript><img src="https:https://t.paypal.com/ts?nojs=1&pgrp=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&page=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&qual=&comp=authchallengenodeweb&tsrce=checkoutuinodeweb_weasley&cu=0&ef_policy=ccpa&c_prefs=&pxpguid=6604a84619f647e0b8e1ec86fde64232&pgst=*********3131&calc=f2727359327c1&csci=fa8130022e91453c8e32b2a1c9a16254&nsid=OyNvjPnMqy4M6T1DN3ELmI1QGKg_SY9w&rsta=pt_BR&ccpg=BR&pgtf=Nodejs&s=ci&env=live&xe=114211&xt=176915" alt="" height="1" width="1" border="0"></noscript>
+            
+        <!--            Script info: script: node, template:  , date: Jul 15, 2026 06:44:03 -07:00, country: BR, language: pt             web version:  content version:              hostname : rZJvnqaaQhLn/
+21:44:03 | ERROR    | Failed to initiate OTP for *********1212: Expecting value: line 1 column 1 (char 0)
+21:44:03 | INFO     | 发送验证码失败。请输入新的手机号重新发送（如 +*********3818）；输入 q 退出。
+21:45:41 | INFO     | Phone updated for OTP retry: *********1212
+21:45:41 | INFO     | Step 1: Initiating 2FA phone confirmation for *********1212...
+21:45:47 | INFO     | GraphQL InitiateRiskBasedTwoFactorPhoneConfirmationMutation HTTP 200 bytes=587 paypal_debug_id=f124410ab0352
+21:45:47 | INFO     | 2FA initiation result (sanitized): {
+  "data": {
+    "initiateRiskBasedTwoFactorPhoneConfirmation": {
+      "authId": "****************0426",
+      "challengeId": "****************6537",
+      "state": "PENDING",
+      "__typename": "RiskBasedPhoneConfirmationResponse"
+    }
+  },
+  "extensions": {
+    "tracing": {
+      "version": 1,
+      "startTime": "2026-07-15T13:45:45.301Z",
+      "endTime": "2026-07-15T13:45:46.264Z",
+      "duration": *****0000,
+      "execution": {
+        "resolvers": [
+          {
+            "path": [
+
+21:45:47 | INFO     | 2FA state: PENDING, authId=<redacted>, challengeId=<redacted>
+21:45:47 | INFO     | SMS verification code sent to phone: *********1212
+21:45:47 | INFO     | 请输入6位短信验证码；如需换号，输入新手机号（如 +*********3818 或 phone:+*********3818）；输入 q 退出。
+21:46:09 | INFO     | Phone updated for OTP retry: *********2740
+21:46:09 | INFO     | Re-sending OTP to the new phone...
+21:46:09 | INFO     | Step 1: Initiating 2FA phone confirmation for *********2740...
+21:46:14 | INFO     | GraphQL InitiateRiskBasedTwoFactorPhoneConfirmationMutation HTTP 200 bytes=587 paypal_debug_id=f9768547eb728
+21:46:14 | INFO     | 2FA initiation result (sanitized): {
+  "data": {
+    "initiateRiskBasedTwoFactorPhoneConfirmation": {
+      "authId": "****************6318",
+      "challengeId": "**************6611",
+      "state": "PENDING",
+      "__typename": "RiskBasedPhoneConfirmationResponse"
+    }
+  },
+  "extensions": {
+    "tracing": {
+      "version": 1,
+      "startTime": "2026-07-15T13:46:12.767Z",
+      "endTime": "2026-07-15T13:46:13.778Z",
+      "duration": ******0000,
+      "execution": {
+        "resolvers": [
+          {
+            "path": [
+ 
+21:46:14 | INFO     | 2FA state: PENDING, authId=<redacted>, challengeId=<redacted>
+21:46:14 | INFO     | SMS verification code sent to phone: *********2740
+21:46:14 | INFO     | 请输入6位短信验证码；如需换号，输入新手机号（如 +*********3818 或 phone:+*********3818）；输入 q 退出。
+21:46:38 | INFO     | Step 2: Confirming OTP: <redacted>
+21:46:44 | INFO     | GraphQL ConfirmRiskBasedTwoFactorPhoneConfirmationMutation HTTP 200 bytes=550 paypal_debug_id=f247299be8e2a
+21:46:44 | INFO     | OTP confirmation result (sanitized): {
+  "data": {
+    "confirmRiskBasedTwoFactorPhoneConfirmation": {
+      "authId": null,
+      "challengeId": null,
+      "state": "CONFIRMED",
+      "__typename": "RiskBasedPhoneConfirmationResponse"
+    }
+  },
+  "extensions": {
+    "tracing": {
+      "version": 1,
+      "startTime": "2026-07-15T13:46:43.943Z",
+      "endTime": "2026-07-15T13:46:44.058Z",
+      "duration": *****0000,
+      "execution": {
+        "resolvers": [
+          {
+            "path": [
+              "confirmRiskBasedTwoF
+21:46:44 | SUCCESS  | OTP confirmed successfully!
+21:46:44 | INFO     | Step 3: Creating account (SignUpNewMember), card attempt 1/5: ************4157
+21:46:44 | WARNING  | InstallmentOptionsQuery failed: PayPalSession.graphql() missing 1 required positional argument: 'variables'
+21:47:10 | INFO     | OTP challenge (idapps/graphql) HTTP 200 bytes=7610
+21:47:11 | INFO     | GraphQL SignUpNewMemberMutation HTTP 200 bytes=7609 paypal_debug_id=f758971139a92
+21:47:11 | WARNING  | GraphQL SignUpNewMemberMutation returned non-JSON response: status=200 paypal_debug_id=f758971139a92 body_len=7606 - attempting token extraction
+21:47:11 | ERROR    | GraphQL SignUpNewMemberMutation non-JSON response body (first 2000): <!DOCTYPE html>
+<!--[if lt IE 9]><html lang="en" class="no-js lower-than-ie9" ><![endif]-->
+<!--[if lt IE 10]><html lang="en" class="no-js lower-than-ie10" ><![endif]-->
+<!--[if !IE]>--><html lang="en" class="no-js" ><!--<![endif]-->
+    <head>
+        
+                <script src="https://www.paypalobjects.com/pa/js/pa.js"></script>
+                    
+                
+                <script nonce="El+ztq0qqvdTalPMQFvuTQinK3lonQCIpF58h2l8K29okiGh">
+                    (function(){
+                        if(typeof PAYPAL.analytics != "undefined"){
+                            PAYPAL.core = PAYPAL.core || {};
+                            PAYPAL.core['pta'] = PAYPAL.analytics.setup({data:'pgrp=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&page=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&qual=&comp=authchallengenodeweb&tsrce=authchallengenodeweb&cu=0&ef_policy=ccpa&c_prefs=&pxpguid=6604a84619f647e0b8e1ec86fde64232&pgst=*********0922&calc=f758971139a92&csci=957a9b24654446c4998ea9153e6df9f0&nsid=OyNvjPnMqy4M6T1DN3ELmI1QGKg_SY9w&rsta=pt_BR&ccpg=BR&pgtf=Nodejs&s=ci&env=live&xe=114211&xt=176915', url:'https://t.paypal.com/ts'});
+                        }
+                    }());
+                </script>
+                <noscript><img src="https:https://t.paypal.com/ts?nojs=1&pgrp=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&page=authchallengenodeweb%2Flayouts%2Fmaster.html.dust&qual=&comp=authchallengenodeweb&tsrce=authchallengenodeweb&cu=0&ef_policy=ccpa&c_prefs=&pxpguid=6604a84619f647e0b8e1ec86fde64232&pgst=*********0922&calc=f758971139a92&csci=957a9b24654446c4998ea9153e6df9f0&nsid=OyNvjPnMqy4M6T1DN3ELmI1QGKg_SY9w&rsta=pt_BR&ccpg=BR&pgtf=Nodejs&s=ci&env=live&xe=114211&xt=176915" alt="" height="1" width="1" border="0"></noscript>
+            
+        <!--            Script info: script: node, template:  , date: Jul 15, 2026 06:47:10 -07:00, country: BR, language: pt             web version:  content version:              hostname : rZJvnqaaQhLn/nmWT8cSUjO
+21:47:11 | WARNING  | SignUpNewMember returned non-JSON and no token found; returning synthetic error
+21:47:11 | INFO     | Signup result (sanitized): {
+  "data": {},
+  "errors": [
+    {
+      "message": "NON_JSON_RESPONSE",
+      "errorData": {}
+    }
+  ]
+}
+21:47:11 | ERROR    | Signup error detail: {
+  "message": "NON_JSON_RESPONSE",
+  "name": null,
+  "statusCode": null,
+  "checkpoints": null,
+  "contingency": null,
+  "path": null,
+  "data": null,
+  "errorData": {},
+  "meta": null,
+  "extensions": null
+}
+21:47:11 | ERROR    | Signup failed because onboardAccount is empty. Sanitized response: {
+  "data": {},
+  "errors": [
+    {
+      "message": "NON_JSON_RESPONSE",
+      "errorData": {}
+    }
+  ]
+}
+21:47:11 | WARNING  | Card rejected by signup/addCard. Fetching a fresh random Visa/MasterCard from suijidaquan and retrying...
+21:47:18 | INFO     | New generated card for retry: ************3841 exp=12/2029
+21:47:18 | INFO     | Step 3: Creating account (SignUpNewMember), card attempt 2/5: ************3841
+21:47:18 | WARNING  | InstallmentOptionsQuery failed: PayPalSession.graphql() missing 1 required positional argument: 'variables'
+21:47:41 | INFO     | OTP challenge (idapps/graphql) HTTP 200 bytes=7601
+21:47:44 | INFO     | GraphQL SignUpNewMemberMutation HTTP 200 bytes=741 paypal_debug_id=f4859441bb4b5
+21:47:44 | ERROR    | GraphQL SignUpNewMemberMutation returned errors: status=200 paypal_debug_id=f4859441bb4b5 errors=[
+  {
+    "message": "INSTRUMENT_SHARING_LIMIT_EXCEEDED",
+    "checkpoints": [
+      "addCard"
+    ],
+    "meta": {},
+    "errorData": {
+      "0": {
+        "field": "cardNumber",
+        "code": "CARD_GENERIC_ERROR"
+      },
+      "accessToken": "<redacted>"
+    },
+    "contingency": true,
+    "path": [
+      "onboardAccount"
+    ],
+    "extensions": {
+      "class": "ERROR"
+    },
+    "statusCode": 200
+  }
+]
+21:47:44 | INFO     | Signup result (sanitized): {
+  "errors": [
+    {
+      "message": "INSTRUMENT_SHARING_LIMIT_EXCEEDED",
+      "checkpoints": [
+        "addCard"
+      ],
+      "meta": {},
+      "errorData": {
+        "0": {
+          "field": "cardNumber",
+          "code": "CARD_GENERIC_ERROR"
+        },
+        "accessToken": "<redacted>"
+      },
+      "contingency": true,
+      "path": [
+        "onboardAccount"
+      ],
+      "extensions": {
+        "class": "ERROR"
+      },
+      "statusCode": 200
+    }
+  ],
+  "data": {
+    "onboardAccount": null
+  },
+  "extensions": {
+    "tracing": {
+      "version": 1,
+      "startTime": "2026-07-15T13:47:42.084Z",
+      "endTime": "2026-07-15T13:47:43.998Z",
+      "duration": ******0000,
+      "execution": {
+        "resolvers": [
+          {
+            "path": [
+              "signUpNewMember"
+            ],
+            "parentType": "Query",
+            "fieldName": "signUpNewMember",
+            "returnType": "Object",
+            "startOffset": 0,
+            "duration": ******8583
+          }
+        ]
+      }
+    },
+    "correlationId": "f4859441bb4b5"
+  }
+}
+21:47:44 | ERROR    | Signup error detail: {
+  "message": "INSTRUMENT_SHARING_LIMIT_EXCEEDED",
+  "name": null,
+  "statusCode": 200,
+  "checkpoints": [
+    "addCard"
+  ],
+  "contingency": true,
+  "path": [
+    "onboardAccount"
+  ],
+  "data": null,
+  "errorData": {
+    "0": {
+      "field": "cardNumber",
+      "code": "CARD_GENERIC_ERROR"
+    },
+    "accessToken": "<redacted>"
+  },
+  "meta": {},
+  "extensions": {
+    "class": "ERROR"
+  }
+}
+21:47:44 | ERROR    | Signup failed because onboardAccount is empty. Sanitized response: {
+  "errors": [
+    {
+      "message": "INSTRUMENT_SHARING_LIMIT_EXCEEDED",
+      "checkpoints": [
+        "addCard"
+      ],
+      "meta": {},
+      "errorData": {
+        "0": {
+          "field": "cardNumber",
+          "code": "CARD_GENERIC_ERROR"
+        },
+        "accessToken": "<redacted>"
+      },
+      "contingency": true,
+      "path": [
+        "onboardAccount"
+      ],
+      "extensions": {
+        "class": "ERROR"
+      },
+      "statusCode": 200
+    }
+  ],
+  "data": {
+    "onboardAccount": null
+  },
+  "extensions": {
+    "tracing": {
+      "version": 1,
+      "startTime": "2026-07-15T13:47:42.084Z",
+      "endTime": "2026-07-15T13:47:43.998Z",
+      "duration": ******0000,
+      "execution": {
+        "resolvers": [
+          {
+            "path": [
+              "signUpNewMember"
+            ],
+            "parentType": "Query",
+            "fieldName": "signUpNewMember",
+            "returnType": "Object",
+            "startOffset": 0,
+            "duration": ******8583
+          }
+        ]
+      }
+    },
+    "correlationId": "f4859441bb4b5"
+  }
+}
+21:47:44 | WARNING  | Card/addCard failed but PayPal returned an access token. The member account is already created at this point, so re-sending SignUpNewMember with a new card would produce ACCOUNT_ALREADY_EXISTS. Continuing with the returned token.
+21:47:47 | INFO     | --- Phase 4: Final authorization ---
+21:47:47 | INFO     | Loading Hermes/Hagrid review context...
+21:47:49 | INFO     | Hermes/Hagrid review loaded: 403 bytes=9194
+21:47:49 | INFO     | Sending Tealeaf session data...
+21:47:50 | INFO     | Querying billing agreement context: EC-81M...190X
+21:47:52 | INFO     | GraphQL BillingAgreementContextQueryForAddCard HTTP 200 bytes=7574 paypal_debug_id=f229815d92ad2
+21:47:52 | WARNING  | GraphQL BillingAgreementContextQueryForAddCard returned non-JSON response: status=200 paypal_debug_id=f229815d92ad2 body_len=7571 - attempting token extraction
+21:47:52 | INFO     | Found EUAT token in cookies after non-JSON response
+21:47:52 | INFO     | Billing context result (sanitized): {
+  "data": {
+    "onboardAccount": {
+      "buyer": {
+        "auth": {
+          "accessToken": "<redacted>"
+        },
+        "userId": ""
+      }
+    }
+  },
+  "errors": []
+}
+21:47:52 | ERROR    | Billing context query failed: empty result. Errors: []
+21:47:52 | ERROR    | === Flow completed with error status ===
