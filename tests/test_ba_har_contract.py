@@ -75,6 +75,18 @@ class RetryClient:
         return FakeResponse(url, "ok")
 
 
+class DirectRetryClient:
+    def __init__(self, fail_count: int):
+        self.fail_count = fail_count
+        self.calls = 0
+
+    def request(self, method, url, **kwargs):
+        self.calls += 1
+        if self.calls <= self.fail_count:
+            raise httpx.ConnectError("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred")
+        return FakeResponse(url, "ok")
+
+
 class BAHarContractTests(unittest.TestCase):
     def make_flow(self):
         user, card, address, _ = generate_country_materials("+38761123456", "BA")
@@ -103,6 +115,35 @@ class BAHarContractTests(unittest.TestCase):
         response = session._request_with_proxy_retries("POST", "https://www.paypal.com/graphql")
         self.assertEqual(200, response.status_code)
         self.assertEqual(2, session.client.calls)
+
+    def test_direct_ssl_eof_retries_the_request(self):
+        session = object.__new__(PayPalSession)
+        session.proxy_url = None
+        session.proxy_label = "代理关闭"
+        session.client = DirectRetryClient(fail_count=1)
+        session._sync_state_cookies = lambda: None
+
+        response = session._request_with_proxy_retries(
+            "GET",
+            "https://www.paypal.com/agreements/approve?ba_token=BA-TEST12345678",
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, session.client.calls)
+
+    def test_direct_ssl_eof_after_retries_explains_proxy_disabled(self):
+        session = object.__new__(PayPalSession)
+        session.proxy_url = None
+        session.proxy_label = "代理关闭"
+        session.client = DirectRetryClient(fail_count=PayPalSession.PROXY_REQUEST_ATTEMPTS)
+        session._sync_state_cookies = lambda: None
+
+        with self.assertRaisesRegex(RuntimeError, "proxy is disabled"):
+            session._request_with_proxy_retries(
+                "GET",
+                "https://www.paypal.com/agreements/approve?ba_token=BA-TEST12345678",
+            )
+        self.assertEqual(PayPalSession.PROXY_REQUEST_ATTEMPTS, session.client.calls)
 
     def test_ba_signup_and_billing_contract_matches_har(self):
         flow = self.make_flow()

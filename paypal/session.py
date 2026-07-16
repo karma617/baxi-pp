@@ -231,18 +231,32 @@ class PayPalSession:
                 logger.debug(f"  -> {resp.status_code} ({len(resp.content)} bytes)")
                 return resp
             except Exception as exc:
-                if not self.proxy_url or not self._is_proxy_transport_error(exc):
+                if not self._is_proxy_transport_error(exc):
                     raise
-                logger.warning(
-                    "Proxy transport error via {} on attempt {}/{}: {}",
-                    self.proxy_label,
-                    attempt,
-                    self.PROXY_REQUEST_ATTEMPTS,
-                    exc,
-                )
+                if self.proxy_url:
+                    logger.warning(
+                        "Proxy transport error via {} on attempt {}/{}: {}",
+                        self.proxy_label,
+                        attempt,
+                        self.PROXY_REQUEST_ATTEMPTS,
+                        exc,
+                    )
+                else:
+                    logger.warning(
+                        "Direct transport error on attempt {}/{}: {}",
+                        attempt,
+                        self.PROXY_REQUEST_ATTEMPTS,
+                        exc,
+                    )
                 if attempt < self.PROXY_REQUEST_ATTEMPTS:
                     attempt += 1
                     continue
+                if not self.proxy_url:
+                    raise RuntimeError(
+                        "PayPal transport error after direct connection retries: "
+                        "proxy is disabled; enable proxy or check outbound network. "
+                        f"Last error: {exc}"
+                    ) from exc
                 if not self._switch_proxy(used_proxy_count):
                     raise
                 used_proxy_count += 1

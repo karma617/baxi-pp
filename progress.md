@@ -937,3 +937,167 @@ BR Phase4 的浏览器 authorize 改为三段式：先在 Hagrid billing review 
 - progress.md：追加本轮施工记录
 回滚：git checkout -- paypal/browser_assist.py paypal/flow.py docs/hermes-session-bind.md progress.md
 需要重启网页服务后新逻辑才生效。
+
+## 2026-07-16 - Task: 网页端接入 Hero-SMS / SMSBrower 自动接码
+
+### What was done
+页面新增验证码方式选择，支持手动输入、Hero-SMS 自动取号取码、SMSBrower 自动取号取码。自动模式下启动任务会先从接码平台获取手机号，再用该手机号生成资料并进入 PayPal 流程；验证码阶段自动等待平台返回验证码并提交。Hero-SMS 成功收到验证码后保留手机号供后续任务复用，超时或验证码不通过时释放并换新号；SMSBrower 每轮任务单独取号，不做复用。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers tests.test_browser_proxy_binding tests.test_ba_har_contract tests.test_authorize_success_gate -v：24 passed
+
+### Notes
+改动文件：
+- paypal/sms_providers.py：新增 SMS-Activate 风格平台封装，支持 Hero-SMS / SMSBrower 获取手机号、轮询验证码、完成/释放号码，并维护 Hero-SMS 复用池
+- web.py：WebJob 增加接码配置和租号状态，自动模式下先拿号再生成资料，验证码阶段自动等码、超时换号，任务结束按结果释放或保留号码
+- web_static/index.html：启动表单新增验证码方式选择和 Hero-SMS / SMSBrower 配置表单
+- web_static/app.js：新增接码配置保存/回填、手机号必填状态切换，并提交接码配置到任务接口
+- web_static/app.css：新增接码配置面板样式
+- docs/sms-providers.md：新增自动接码配置、Hero-SMS 复用规则、SMSBrower 单次取号规则说明
+- README.md：补充自动接码能力和文档入口
+- tests/test_sms_providers.py：新增接码配置解析、provider 别名、Hero-SMS 成功复用/失败释放单测
+- progress.md：追加本轮施工记录
+回滚：git checkout -- web.py web_static/index.html web_static/app.js web_static/app.css README.md progress.md；删除 paypal/sms_providers.py docs/sms-providers.md tests/test_sms_providers.py
+需要重启网页服务后新页面和自动接码逻辑才生效。未跟踪文件 paypal/sms_otp.py 不是本轮接入文件，未改动。
+
+## 2026-07-16 - Task: 接码平台 service/country 自动下拉和筛选
+
+### What was done
+接码配置会继续自动保存到当前浏览器 localStorage。Hero-SMS / SMSBrower 的 API 地址改为可选说明：留空使用内置默认接口，只有平台域名变更或走自建转发时才需要填写。页面将 service 和 country 从手动输入改为“筛选框 + 下拉框”，填写 API Key 后会通过本地 `/api/sms/options` 调平台兼容接口拉取 `getCountries/getServices`，支持按名称或代码筛选，并保留默认值 `ot` / `73` 作为兜底。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：4 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers tests.test_browser_proxy_binding tests.test_ba_har_contract tests.test_authorize_success_gate -v：25 passed
+
+### Notes
+改动文件：
+- paypal/sms_providers.py：新增 getCountries/getServices 查询、SMS-Activate 元数据返回解析和 fetch_sms_options
+- web.py：新增 `/api/sms/options` 本地接口，前端通过服务端代理拉取接码平台 service/country
+- web_static/index.html：将 service/country 改为筛选输入加下拉框，API 地址标注为可选，并新增刷新接码选项按钮
+- web_static/app.js：新增接码选项自动拉取、防抖、下拉渲染、筛选、回填和刷新逻辑
+- web_static/app.css：补充接码选项组合和错误状态样式
+- docs/sms-providers.md：同步配置保存、API 地址可选、service/country 自动下拉和筛选说明
+- tests/test_sms_providers.py：新增国家/服务元数据解析单测
+- progress.md：追加本轮施工记录
+回滚：git checkout -- paypal/sms_providers.py web.py web_static/index.html web_static/app.js web_static/app.css docs/sms-providers.md tests/test_sms_providers.py progress.md
+需要重启网页服务后新页面和 `/api/sms/options` 接口才生效。
+
+## 2026-07-16 - Task: Phase0 裸连 SSL EOF 短重试和明确报错
+
+### What was done
+针对日志里的 `Proxy: 代理关闭` + Phase0 `[SSL: UNEXPECTED_EOF_WHILE_READING]` 失败，将 PayPal 会话层的 TLS/连接类传输异常重试从“仅代理开启”扩展为“裸连也短重试”。如果代理关闭且 3 次仍失败，任务会给出明确的代理关闭/外网连接错误，不再只暴露底层 SSL EOF。代理开启时原有换代理逻辑保持不变。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile paypal\session.py tests\test_ba_har_contract.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：8 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers tests.test_browser_proxy_binding tests.test_ba_har_contract tests.test_authorize_success_gate -v：30 passed
+
+### Notes
+改动文件：
+- paypal/session.py：裸连 TLS/连接类传输异常也短重试，重试耗尽后提示启用代理或检查外网
+- tests/test_ba_har_contract.py：新增裸连 SSL EOF 成功重试和耗尽后明确报错单测
+- README.md：补充代理关闭时只短重试、不自动换出口的说明
+- docs/web-proxy-pool.md：同步 TLS/连接类异常的代理开启/关闭差异
+- progress.md：追加本轮施工记录
+回滚：当前工作树已有前序未提交改动，不建议整文件 checkout；如需只回滚本轮，移除 `paypal/session.py` 中 direct transport error 分支，删除 `tests/test_ba_har_contract.py` 的 `DirectRetryClient` 和两个 direct SSL EOF 单测，并把 README / docs 中本轮新增的“代理关闭只短重试”说明恢复为原句；最后删除本章节。
+
+## 2026-07-16 - Task: 修正接码平台选项接口和设置弹窗布局
+
+### What was done
+Hero-SMS 的 service 列表改为只通过 `getPrices` 推导，不再调用会返回 `404` 的 `getServices`；国家列表在 `getCountries` 不可用时会从价格表反推国家代码。SMSBrower/SMSBower 保持使用文档给出的 `getServicesList`。设置页保持右上角齿轮弹窗，配置项按平台分成两列卡片，service/country 改为单个可输入筛选的下拉输入，不再拆成筛选框和选择框；刷新按钮会刷新已填写 API Key 的平台。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：7 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers tests.test_browser_proxy_binding tests.test_ba_har_contract tests.test_authorize_success_gate -v：28 passed
+
+### Notes
+改动文件：
+- paypal/sms_providers.py：按平台拆分 service 列表动作，Hero-SMS 只走 getPrices，SMSBrower 只走 getServicesList，并新增价格表国家解析
+- web_static/app.js：刷新按钮改为刷新已配置 API Key 的平台，页面初始化也会加载已配置平台选项
+- web_static/app.css：设置弹窗改为桌面双平台两列、平台内单列表单，移动端保持单列
+- web_static/index.html：更新静态资源版本号，避免旧布局缓存
+- docs/sms-providers.md：同步 Hero-SMS/SMSBrower service 列表动作和单输入框筛选说明
+- tests/test_sms_providers.py：新增 Hero-SMS 不调用 getServices、SMSBrower 调用 getServicesList 的单测
+- progress.md：追加本轮施工记录
+回滚：当前接码相关文件包含前序未提交/未跟踪改动，不建议整文件 checkout；如需只回滚本轮，反向移除 `parse_sms_price_countries`、`get_services/get_countries` 的平台动作分流、`refreshConfiguredSmsOptions`、本轮 CSS 弹窗布局调整和静态版本号改动。
+需要重启网页服务并强刷页面后新前端资源才生效。
+
+## 2026-07-16 - Task: 修复接码下拉筛选输入无法清空
+
+### What was done
+修复 service/country 筛选输入框最后一个字符删不掉的问题。候选列表渲染时不再把默认值 `ot` / `73` 或当前筛选值回写到输入框，只刷新 datalist 候选项；输入框清空后可以正常显示完整候选列表并重新筛选。同步更新前端静态资源版本，避免浏览器继续使用旧脚本缓存。
+
+### Testing
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：7 passed
+
+### Notes
+改动文件：
+- web_static/app.js：移除筛选渲染时对输入框 value 的强制回写，允许输入框完全清空
+- web_static/index.html：更新 CSS/JS 静态资源版本参数，确保前端加载新脚本
+- progress.md：追加本轮施工记录
+回滚：反向恢复 `renderSmsSelect()` 中默认值回填和 `input.value = current`，并将 `web_static/index.html` 静态资源版本恢复到上一版。
+需要重启网页服务或强刷页面后新前端脚本才生效。
+
+## 2026-07-16 - Task: Hero-SMS 服务名合并库存显示
+
+### What was done
+修复 Hero-SMS service 仍显示 code 的问题。后端拉取 Hero-SMS 选项时先调用 `getServicesList` 获取服务名，再调用 `getPrices` 获取库存，并按 service code 合并为“服务名 + 库存”的 label；只有服务名接口不可用时才降级显示 code+库存。继续避免调用会返回 `404` 的 `getServices`。
+
+### Testing
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：7 passed
+
+### Notes
+改动文件：
+- paypal/sms_providers.py：Hero-SMS service 选项新增 getServicesList 服务名拉取和 getPrices 库存合并逻辑
+- tests/test_sms_providers.py：更新 Hero-SMS 选项单测，要求服务名和库存合并显示
+- docs/sms-providers.md：同步 Hero-SMS 服务名来源和库存合并说明
+- progress.md：追加本轮施工记录
+回滚：移除 `merge_sms_service_labels()` 和 `_extract_stock_count()`，并将 Hero-SMS `get_services()` 恢复为只调用 `getPrices` 后 `parse_sms_price_services()`。
+需要在页面点击“刷新接码选项”或重启网页服务后重新加载选项才生效。
+
+## 2026-07-16 - Task: 接码 country 按名称显示和筛选
+
+### What was done
+country 下拉候选改为显示国家名并按国家名筛选，不再把 country code 或 `名称 (code)` 作为候选主显示内容。前端保留国家名到 country code 的映射，刷新接码选项和启动任务时会把用户选中的国家名自动转换成平台需要的 country code；旧配置中保存的 `73` 这类 code 在选项加载后仍可自动映射成国家名。
+
+### Testing
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：7 passed
+
+### Notes
+改动文件：
+- web_static/app.js：统一 service/country 的显示文本逻辑，country 改为国家名显示和筛选，提交时仍转换为 code
+- web_static/index.html：更新 CSS/JS 静态资源版本参数，确保浏览器加载新脚本
+- docs/sms-providers.md：补充 country 按国家名显示/筛选、提交时转换 code 的说明
+- progress.md：追加本轮施工记录
+回滚：将 `smsOptionDisplay()` 恢复为 country 使用 `optionText()`，恢复 `renderSmsSelect()` 中 country 按 code+label 筛选和 datalist label 设置，并恢复上一版静态资源版本。
+需要重启网页服务或强刷页面后新前端脚本才生效。
+
+## 2026-07-16 - Task: 接码 service 按名称显示和筛选
+
+### What was done
+service 下拉候选改为显示服务名并按服务名筛选，不再把平台 service code 作为候选主显示内容。前端保留名称到 code 的映射，刷新接码选项和启动任务时会把用户选中的服务名自动转换成平台需要的 service code，避免因为显示名称导致自动接码提交错误。
+
+### Testing
+- node --check web_static\app.js
+- .\.venv\Scripts\python.exe -m py_compile web.py paypal\sms_providers.py tests\test_sms_providers.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_sms_providers -v：7 passed
+
+### Notes
+改动文件：
+- web_static/app.js：新增 service 显示名、筛选名和提交 code 的映射逻辑
+- web_static/index.html：更新 CSS/JS 静态资源版本参数，确保浏览器加载新脚本
+- docs/sms-providers.md：补充 service 按名称显示/筛选、提交时转换 code 的说明
+- progress.md：追加本轮施工记录
+回滚：反向移除 `smsOptionDisplay`、`findSmsOption`、`smsInputValue`、`syncSmsInputDisplay` 相关映射逻辑，将 service datalist 的 option value 恢复为 row.code，并恢复上一版静态资源版本。
+需要重启网页服务或强刷页面后新前端脚本才生效。

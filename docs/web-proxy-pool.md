@@ -40,6 +40,7 @@ socks5://user:pass@host:port
 
 - API 模式失败：回退到环境变量 / `config.PROXY_POOL`
 - 代理池为空：回退到环境变量 / `config.PROXY_POOL`
+- TLS/连接类传输异常：同一请求最多短重试 3 次；代理开启时再切换下一个代理，代理关闭时只报明确网络/代理关闭错误
 
 ## 有头浏览器
 启用代理后，Playwright 有头浏览器与 httpx 共用同一代理出口；不会在会话开代理时裸连。

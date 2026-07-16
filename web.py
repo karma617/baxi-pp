@@ -30,6 +30,15 @@ from paypal.flow_factory import flow_class_for_country, normalize_flow_country
 from paypal.models import BillingAddress, CardInfo, UserInfo, generate_address, generate_card, generate_user
 from paypal.models import generate_country_materials
 from paypal.proxy import ProxyConfig, build_dynamic_proxy_config, build_proxy_config, parse_proxy_pool_text
+from paypal.sms_providers import (
+    SmsLease,
+    SmsProviderConfig,
+    acquire_sms_lease,
+    fetch_sms_options,
+    finish_sms_lease,
+    normalize_sms_provider,
+    wait_with_log,
+)
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "web_static"
@@ -244,6 +253,8 @@ class WebJob:
     debug: bool = False
     max_card_attempts: int = 5
     max_phone_changes: int = 5
+    sms_provider: str = "manual"
+    sms_config: SmsProviderConfig = field(default_factory=SmsProviderConfig)
     proxy_enabled: bool = False
     proxy_mode: str = "api"  # api | pool
     proxy_pool_text: str = ""
@@ -264,6 +275,8 @@ class WebJob:
     _condition: threading.Condition = field(default_factory=threading.Condition, repr=False)
     _input_queue: list[str] = field(default_factory=list, repr=False)
     _proxy_config: ProxyConfig | None = field(default=None, repr=False)
+    _sms_lease: SmsLease | None = field(default=None, repr=False)
+    _sms_code_received: bool = field(default=False, repr=False)
 
     def set_status(self, status: str, stage: str | None = None) -> None:
         with self._condition:
@@ -311,6 +324,43 @@ class WebJob:
             self.updated_at = now_ts()
             self._condition.notify_all()
             return value
+
+    def acquire_sms_phone(self) -> str:
+        with self._condition:
+            existing = self._sms_lease
+        if existing:
+            return existing.phone
+        lease = acquire_sms_lease(self.sms_config)
+        with self._condition:
+            self._sms_lease = lease
+            self.phone = lease.phone
+            self.updated_at = now_ts()
+            self._condition.notify_all()
+        return lease.phone
+
+    def wait_for_sms_code(self) -> str:
+        with self._condition:
+            lease = self._sms_lease
+        if not lease:
+            raise RuntimeError("接码平台尚未获取手机号")
+        code = wait_with_log(
+            lease,
+            self.sms_config.timeout_seconds,
+            log_fn=lambda msg: logger.info(msg),
+        )
+        if code:
+            with self._condition:
+                self._sms_code_received = True
+                self.updated_at = now_ts()
+            return code
+        self.release_sms_phone(keep=False)
+        raise TimeoutError(f"{self.sms_provider} {self.sms_config.timeout_seconds}秒内未收到验证码，当前手机号已释放")
+
+    def release_sms_phone(self, *, keep: bool) -> None:
+        with self._condition:
+            lease = self._sms_lease
+            self._sms_lease = None
+        finish_sms_lease(self.sms_config, lease, keep=keep)
 
     def submit_input(self, value: str) -> None:
         value = (value or "").strip()
@@ -361,6 +411,7 @@ class WebJob:
                 "debug": self.debug and ALLOW_DEBUG_LOGS,
                 "max_card_attempts": self.max_card_attempts,
                 "max_phone_changes": self.max_phone_changes,
+                "sms_provider": self.sms_provider,
                 "proxy_enabled": self.proxy_enabled,
                 "proxy_mode": self.proxy_mode,
                 "proxy_label": self.proxy_label,
@@ -578,6 +629,8 @@ class WebPayPalFlow(PayPalFlow):
                     raise
                 raise
 
+        auto_sms = self.job.sms_config.enabled
+
         while True:
             try:
                 auth_id, challenge_id = _initiate_with_optional_browser()
@@ -588,6 +641,18 @@ class WebPayPalFlow(PayPalFlow):
                         "OTP send failed and phone-change limit reached "
                         f"({max_phone_changes}). Reopen the task with a cleaner session."
                     ) from e
+                if auto_sms:
+                    self.job.release_sms_phone(keep=False)
+                    new_phone = self.job.acquire_sms_phone()
+                    self._update_user_phone(new_phone)
+                    phone_changes += 1
+                    prefer_browser_initiate = True
+                    logger.warning(
+                        "自动接码发码失败，已释放当前号并切换新号（{}/{}）",
+                        phone_changes,
+                        max_phone_changes,
+                    )
+                    continue
                 while True:
                     value = self._prompt_operator(
                         f"发送验证码失败。还可再换 {remaining} 次手机号；"
@@ -605,6 +670,52 @@ class WebPayPalFlow(PayPalFlow):
                 continue
 
             logger.info("SMS verification code sent to phone: {}", self._masked_phone())
+
+            if auto_sms:
+                try:
+                    code = self.job.wait_for_sms_code()
+                except TimeoutError:
+                    if phone_changes >= max_phone_changes:
+                        raise RuntimeError(
+                            "自动接码超时且换号次数已达上限 "
+                            f"({max_phone_changes})。请更换平台配置或改手动模式。"
+                        )
+                    new_phone = self.job.acquire_sms_phone()
+                    self._update_user_phone(new_phone)
+                    phone_changes += 1
+                    prefer_browser_initiate = True
+                    logger.warning(
+                        "自动接码超时，已切换新号（{}/{}）",
+                        phone_changes,
+                        max_phone_changes,
+                    )
+                    continue
+
+                if self._confirm_2fa_phone_confirmation(
+                    token,
+                    signup_url,
+                    auth_id,
+                    challenge_id,
+                    code,
+                ):
+                    return
+
+                self.job.release_sms_phone(keep=False)
+                if phone_changes >= max_phone_changes:
+                    raise RuntimeError(
+                        "自动接码返回的验证码未通过，且换号次数已达上限 "
+                        f"({max_phone_changes})。"
+                    )
+                new_phone = self.job.acquire_sms_phone()
+                self._update_user_phone(new_phone)
+                phone_changes += 1
+                prefer_browser_initiate = True
+                logger.warning(
+                    "自动接码验证码未通过，已释放当前号并切换新号（{}/{}）",
+                    phone_changes,
+                    max_phone_changes,
+                )
+                continue
 
             while True:
                 value = self._prompt_operator(
@@ -695,6 +806,7 @@ def create_job(
     debug: bool,
     max_card_attempts: int,
     max_phone_changes: int = 5,
+    sms_config: SmsProviderConfig | None = None,
     proxy_enabled: bool = False,
     proxy_mode: str = "api",
     proxy_pool_text: str = "",
@@ -707,9 +819,13 @@ def create_job(
         raise ValueError("BA Token 不能为空")
     if not BA_TOKEN_RE.fullmatch(ba_token):
         raise ValueError("BA Token 格式不正确")
-    if not phone:
+    sms_config = sms_config or SmsProviderConfig()
+    sms_provider = normalize_sms_provider(sms_config.provider)
+    sms_config.provider = sms_provider
+    sms_config.validate()
+    if not phone and sms_provider == "manual":
         raise ValueError("手机号不能为空")
-    if not PHONE_RE.fullmatch(phone):
+    if phone and not PHONE_RE.fullmatch(phone):
         raise ValueError("手机号格式不正确")
     country = normalize_flow_country(country)
     try:
@@ -754,6 +870,8 @@ def create_job(
         debug=debug,
         max_card_attempts=max_card_attempts,
         max_phone_changes=max_phone_changes,
+        sms_provider=sms_provider,
+        sms_config=sms_config,
         proxy_enabled=bool(proxy_enabled),
         proxy_mode=mode,
         proxy_pool_text=pool_text,
@@ -828,6 +946,14 @@ def run_job(job: WebJob) -> None:
             job._proxy_config = proxy_config
             job.proxy_enabled = proxy_config.enabled
             job.proxy_label = proxy_config.label
+            if job.sms_config.enabled:
+                job.set_status("running", "获取接码平台手机号")
+                job.phone = job.acquire_sms_phone()
+                logger.info(
+                    "SMS provider selected: {} phone={}",
+                    job.sms_provider,
+                    mask_phone(job.phone),
+                )
             if job.country != "BR":
                 user, card, address, _profile = generate_country_materials(job.phone, job.country)
             else:
@@ -866,6 +992,8 @@ def run_job(job: WebJob) -> None:
             logger.error("Web job failed: {}", redact_text(exc))
             job.fail(exc)
         finally:
+            if job.sms_config.enabled:
+                job.release_sms_phone(keep=job._sms_code_received)
             if acquired:
                 RUNNER_SEMAPHORE.release()
 
@@ -983,12 +1111,27 @@ class WebHandler(BaseHTTPRequestHandler):
                     debug=bool(data.get("debug", False)),
                     max_card_attempts=int(data.get("max_card_attempts", 5) or 5),
                     max_phone_changes=int(data.get("max_phone_changes", 5) or 5),
+                    sms_config=SmsProviderConfig.from_payload(data),
                     proxy_enabled=bool(data.get("proxy_enabled", False)),
                     proxy_mode=str(data.get("proxy_mode", "api") or "api"),
                     proxy_pool_text=str(data.get("proxy_pool_text", "") or ""),
                     proxy_api_url=str(data.get("proxy_api_url", "") or ""),
                 )
                 return self.send_json({"job": job.to_dict(include_logs=False)}, status=HTTPStatus.CREATED)
+            except Exception as exc:
+                return self.send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+
+        if path == "/api/sms/options":
+            if not self.check_rate_limit("sms_options", limit=60, window_seconds=600):
+                return
+            try:
+                data = self.read_json()
+                cfg = SmsProviderConfig.from_payload(data)
+                if not cfg.enabled:
+                    raise ValueError("请选择 Hero-SMS 或 SMSBrower")
+                country = str(data.get("country", "") or cfg.country or "").strip()
+                options = fetch_sms_options(cfg, country=country)
+                return self.send_json(options)
             except Exception as exc:
                 return self.send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
 

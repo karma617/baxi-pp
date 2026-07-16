@@ -28,6 +28,7 @@ body {
 
 .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 48px; }
 .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+.hero-actions { display: flex; align-items: center; gap: 10px; }
 .eyebrow { margin: 0 0 8px; color: var(--blue); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
 h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); line-height: 1; }
 .subtitle { margin: 14px 0 0; color: var(--muted); font-size: 16px; }
@@ -63,6 +64,9 @@ input:focus, select:focus, textarea:focus { border-color: rgba(99, 165, 255, .75
 .check-row input { width: 16px; height: 16px; }
 .check-row.small { font-size: 12px; }
 .proxy-panel { display: grid; gap: 10px; border: 1px solid rgba(99, 165, 255, .24); background: rgba(99, 165, 255, .07); border-radius: 18px; padding: 14px; }
+.sms-panel { display: grid; gap: 12px; border: 1px solid rgba(72, 213, 151, .24); background: rgba(72, 213, 151, .07); border-radius: 18px; padding: 14px; }
+.sms-option-group { display: grid; gap: 8px; }
+.bad-text { color: var(--red) !important; }
 .form-card:has(#proxyEnabled:checked) #proxyPanel { display: grid !important; }
 .proxy-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
 .proxy-actions button { padding: 9px 12px; white-space: nowrap; }
@@ -71,6 +75,7 @@ button:hover { transform: translateY(-1px); }
 button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .primary { background: linear-gradient(135deg, var(--blue-strong), #7c5cff); }
 .ghost { background: rgba(255,255,255,.05); border: 1px solid var(--line); }
+.icon-btn { width: 40px; height: 40px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--line); background: rgba(255,255,255,.06); border-radius: 999px; font-size: 20px; }
 .hint { margin: 14px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 
 .jobs-list { display: grid; gap: 10px; max-height: 304px; overflow: auto; padding-right: 4px; }
@@ -110,10 +115,21 @@ button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .log-ERROR, .log-CRITICAL { color: var(--red); }
 .log-SUCCESS { color: var(--green); }
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: #17213a; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 12px 18px; box-shadow: var(--shadow); z-index: 20; }
+.modal { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(2, 6, 16, .72); backdrop-filter: blur(10px); z-index: 30; }
+.modal-card { width: min(1080px, 100%); max-height: min(86vh, 860px); overflow: auto; border: 1px solid var(--line); background: rgba(14, 22, 40, .96); border-radius: 24px; box-shadow: var(--shadow); padding: 22px; }
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.modal-head h2 { margin: 0; }
+.provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.provider-card { display: grid; gap: 14px; border: 1px solid rgba(72, 213, 151, .24); background: rgba(72, 213, 151, .06); border-radius: 18px; padding: 16px; }
+.provider-card h3 { margin: 0; }
+.provider-card .form-row { grid-template-columns: 1fr; }
+.modal-foot { display: grid; grid-template-columns: minmax(180px, .35fr) 1fr; gap: 14px; align-items: end; margin-top: 14px; }
+.settings-status { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+.settings-status button { white-space: nowrap; }
 
 @media (max-width: 860px) {
-  .hero, .section-title, .progress-line, .proxy-actions { align-items: stretch; flex-direction: column; }
-  .grid, .form-row, .details-grid, .otp-panel { grid-template-columns: 1fr; }
+  .hero, .hero-actions, .section-title, .progress-line, .proxy-actions, .settings-status { align-items: stretch; flex-direction: column; }
+  .grid, .form-row, .details-grid, .otp-panel, .provider-grid, .modal-foot { grid-template-columns: 1fr; }
   .span-2 { grid-column: span 1; }
   .otp-form { grid-template-columns: 1fr; }
 }

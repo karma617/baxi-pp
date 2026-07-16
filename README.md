@@ -26,6 +26,7 @@ Windows 下也可以直接双击根目录 `start.bat` 一键启动。脚本会�
 - 直接输入 `BA Token`、手机号、最大换卡次数后启动任务。
 - 支持 `BR`、`US`、`BA` 三个支付地区；`BA` 使用波黑资料、`+387` 手机区号、`en_BA` locale 和 `/pay/billing` 审批链路。
 - 可在启动任务时动态勾选是否启用网页代理池；网页填写的代理会优先用于本次任务，空内容则回退到环境变量配置的代理池。
+- 验证码方式支持手动输入、Hero-SMS 自动取码、SMSBrower 自动取码；Hero-SMS 在成功接码后会复用手机号，超时未接到码则释放换号。
 - 点击“开始执行”时会保存启动表单所有字段到当前浏览器，刷新页面后自动回填。
 - 后台自动生成用户、卡片和所选地区地址等资料。
 - 实时显示任务阶段、日志、生成资料和最终结果。
@@ -33,6 +34,8 @@ Windows 下也可以直接双击根目录 `start.bat` 一键启动。脚本会�
 - 执行到短信验证时，网页会暂停并显示验证码输入框。
 - 验证码错误后可继续输入验证码；也可以输入新手机号重新发送。
 - 输入 `q` / `quit` / `exit` 可结束当前验证码流程。
+
+自动接码配置和 Hero-SMS 复用规则见 `docs/sms-providers.md`。
 
 ## 环境变量
 
@@ -49,7 +52,7 @@ Windows 下也可以直接双击根目录 `start.bat` 一键启动。脚本会�
 
 网页代理池支持一行一个代理，格式包括 `host:port`、`user:pass@host:port`、`host:port:user:pass`、`user:pass:host:port`、`host:port##user##pass`，以及 `http://user:pass@host:port`、`socks5://user:pass@host:port`、`socks5://host:port:user:pass` 等带协议头的 URL；未写协议头时运行时默认使用 `http://`。详见 `docs/web-proxy-pool.md`。
 
-运行中遇到代理/TLS/连接等传输异常时，当前代理会对同一请求最多尝试 `3` 次；仍失败则切换代理池中的下一个代理，单次请求最多使用 `6` 个代理。SOCKS5 握手返回 `Malformed reply` 也按传输异常处理。该规则只处理传输异常，不会重试 PayPal 返回的业务错误。使用 SOCKS 代理时依赖 `httpx[http2,socks]` 和 `httpcore[socks]`；如果运行时发现缺少 SOCKS 相关包，会自动用当前 Python 执行 pip 安装后继续创建会话。
+运行中遇到代理/TLS/连接等传输异常时，同一请求最多尝试 `3` 次；代理开启时仍失败则切换代理池中的下一个代理，单次请求最多使用 `6` 个代理；代理关闭时只短重试，不会自动换出口。SOCKS5 握手返回 `Malformed reply` 也按传输异常处理。该规则只处理传输异常，不会重试 PayPal 返回的业务错误。使用 SOCKS 代理时依赖 `httpx[http2,socks]` 和 `httpcore[socks]`；如果运行时发现缺少 SOCKS 相关包，会自动用当前 Python 执行 pip 安装后继续创建会话。
 
 原来的命令行入口 `main.py` 保持可用。
 

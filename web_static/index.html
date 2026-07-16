@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PayPal 协议支付网页端</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260716-proxy-mode" />
+  <link rel="stylesheet" href="/static/app.css?v=20260716-sms-label-filter" />
 </head>
 <body>
   <div class="shell">
@@ -12,9 +12,12 @@
       <div>
         <p class="eyebrow">Public Web Console</p>
         <h1>PayPal 协议支付网页端</h1>
-        <p class="subtitle">直接填写 BA Token 和手机号启动任务；短信验证码会在页面中提示输入。</p>
+        <p class="subtitle">支持手动输入验证码，也可以通过 Hero-SMS / SMSBrower 自动取号取码。</p>
       </div>
-      <div class="status-pill" id="serverStatus">连接中…</div>
+      <div class="hero-actions">
+        <button id="openSettings" class="icon-btn" type="button" title="接码平台设置" aria-label="接码平台设置">&#9881;</button>
+        <div class="status-pill" id="serverStatus">连接中…</div>
+      </div>
     </header>
 
     <main class="grid">
@@ -32,6 +35,14 @@
           <label>
             <span>手机号</span>
             <input id="phone" name="phone" required placeholder="+5591980133818" />
+          </label>
+          <label>
+            <span>验证码方式</span>
+            <select id="smsProvider" name="smsProvider">
+              <option value="manual" selected>手动填写手机号和验证码</option>
+              <option value="herosms">Hero-SMS 自动取号取码（成功后复用手机号）</option>
+              <option value="smsbower">SMSBrower 自动取号取码</option>
+            </select>
           </label>
           <div class="form-row">
             <label>
@@ -93,7 +104,7 @@
           </div>
           <button id="startBtn" class="primary" type="submit">开始执行</button>
         </form>
-        <p class="hint">任务执行到短信验证时会暂停等待输入；地区默认 BR，选择 US 或 BA 时使用对应地区资料和 HAR PayPal 分支。</p>
+        <p class="hint">手动模式会在短信验证时暂停等待输入；自动模式会先从接码平台获取手机号，再进入任务流程。</p>
       </section>
 
       <section class="card jobs-card">
@@ -162,7 +173,84 @@
     </main>
   </div>
 
+  <div id="settingsModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <p class="eyebrow">SMS Provider</p>
+          <h2 id="settingsTitle">接码平台设置</h2>
+        </div>
+        <button id="closeSettings" class="icon-btn" type="button" aria-label="关闭设置">×</button>
+      </div>
+
+      <div class="provider-grid">
+        <section class="provider-card">
+          <h3>Hero-SMS</h3>
+          <div class="form-row">
+            <label>
+              <span>API Key</span>
+              <input id="herosmsApiKey" type="password" autocomplete="off" placeholder="Hero-SMS api_key" />
+            </label>
+            <label>
+              <span>API 地址（可选）</span>
+              <input id="herosmsBaseUrl" placeholder="https://hero-sms.com/stubs/handler_api.php" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              <span>service</span>
+              <input id="herosmsService" list="herosmsServiceOptions" placeholder="输入名称或代码筛选" />
+              <datalist id="herosmsServiceOptions"><option value="ot">ot</option></datalist>
+            </label>
+            <label>
+              <span>country</span>
+              <input id="herosmsCountry" list="herosmsCountryOptions" placeholder="输入国家名或代码筛选" />
+              <datalist id="herosmsCountryOptions"><option value="73">73</option></datalist>
+            </label>
+          </div>
+        </section>
+
+        <section class="provider-card">
+          <h3>SMSBrower</h3>
+          <div class="form-row">
+            <label>
+              <span>API Key</span>
+              <input id="smsbowerApiKey" type="password" autocomplete="off" placeholder="SMSBrower api_key" />
+            </label>
+            <label>
+              <span>API 地址（可选）</span>
+              <input id="smsbowerBaseUrl" placeholder="https://smsbower.page/stubs/handler_api.php" />
+            </label>
+          </div>
+          <div class="form-row">
+            <label>
+              <span>service</span>
+              <input id="smsbowerService" list="smsbowerServiceOptions" placeholder="输入名称或代码筛选" />
+              <datalist id="smsbowerServiceOptions"><option value="ot">ot</option></datalist>
+            </label>
+            <label>
+              <span>country</span>
+              <input id="smsbowerCountry" list="smsbowerCountryOptions" placeholder="输入国家名或代码筛选" />
+              <datalist id="smsbowerCountryOptions"><option value="73">73</option></datalist>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <label>
+          <span>自动等码超时（秒）</span>
+          <input id="smsTimeoutSeconds" type="number" min="15" max="300" value="60" />
+        </label>
+        <div class="settings-status">
+          <span id="smsOptionsStatus">API 地址可留空；填完 API Key 后会自动拉取 service / country。</span>
+          <button id="refreshSmsOptions" class="ghost" type="button">刷新接码选项</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=20260716-proxy-mode"></script>
+  <script src="/static/app.js?v=20260716-sms-label-filter"></script>
 </body>
 </html>

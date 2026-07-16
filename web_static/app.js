@@ -4,6 +4,11 @@ const PROXY_CONFIG_STORAGE_KEY = "paypal-web-proxy-config";
 const state = {
   currentJobId: localStorage.getItem("paypal-web-current-job") || "",
   pollTimer: null,
+  smsOptions: {
+    herosms: { countries: [], services: [] },
+    smsbower: { countries: [], services: [] },
+  },
+  smsOptionTimers: {},
 };
 
 function fmtTime(ts) {
@@ -167,6 +172,16 @@ function runFormPayload() {
     maxCardAttempts: $("#maxCardAttempts")?.value || "5",
     maxPhoneChanges: $("#maxPhoneChanges")?.value || "5",
     debug: Boolean($("#debug")?.checked),
+    smsProvider: $("#smsProvider")?.value || "manual",
+    herosmsApiKey: $("#herosmsApiKey")?.value || "",
+    herosmsBaseUrl: $("#herosmsBaseUrl")?.value || "",
+    herosmsService: $("#herosmsService")?.value || "",
+    herosmsCountry: $("#herosmsCountry")?.value || "",
+    smsbowerApiKey: $("#smsbowerApiKey")?.value || "",
+    smsbowerBaseUrl: $("#smsbowerBaseUrl")?.value || "",
+    smsbowerService: $("#smsbowerService")?.value || "",
+    smsbowerCountry: $("#smsbowerCountry")?.value || "",
+    smsTimeoutSeconds: $("#smsTimeoutSeconds")?.value || "60",
     proxyEnabled: Boolean($("#proxyEnabled")?.checked),
     proxyMode: $("#proxyMode")?.value || "api",
     proxyPool: $("#proxyPool")?.value || "",
@@ -183,6 +198,11 @@ function saveRunForm() {
     proxyPool: payload.proxyPool,
     proxyApiUrl: payload.proxyApiUrl,
   }));
+}
+
+function setInputValue(id, value) {
+  const el = $(id);
+  if (el) el.value = value || "";
 }
 
 function loadRunForm() {
@@ -205,6 +225,16 @@ function loadRunForm() {
   if ($("#maxCardAttempts")) $("#maxCardAttempts").value = payload.maxCardAttempts || "5";
   if ($("#maxPhoneChanges")) $("#maxPhoneChanges").value = payload.maxPhoneChanges || "5";
   if ($("#debug")) $("#debug").checked = Boolean(payload.debug);
+  if ($("#smsProvider")) $("#smsProvider").value = payload.smsProvider || "manual";
+  if ($("#herosmsApiKey")) $("#herosmsApiKey").value = payload.herosmsApiKey || "";
+  if ($("#herosmsBaseUrl")) $("#herosmsBaseUrl").value = payload.herosmsBaseUrl || "";
+  setInputValue("#herosmsService", payload.herosmsService || "ot");
+  setInputValue("#herosmsCountry", payload.herosmsCountry || "73");
+  if ($("#smsbowerApiKey")) $("#smsbowerApiKey").value = payload.smsbowerApiKey || "";
+  if ($("#smsbowerBaseUrl")) $("#smsbowerBaseUrl").value = payload.smsbowerBaseUrl || "";
+  setInputValue("#smsbowerService", payload.smsbowerService || "ot");
+  setInputValue("#smsbowerCountry", payload.smsbowerCountry || "73");
+  if ($("#smsTimeoutSeconds")) $("#smsTimeoutSeconds").value = payload.smsTimeoutSeconds || "60";
   if ($("#proxyEnabled")) {
     $("#proxyEnabled").checked = Boolean(
       payload.proxyEnabled ?? proxyCfg.proxyEnabled
@@ -219,6 +249,7 @@ function loadRunForm() {
   if ($("#proxyApiUrl")) {
     $("#proxyApiUrl").value = payload.proxyApiUrl || proxyCfg.proxyApiUrl || "";
   }
+  syncSmsPanel();
   syncProxyPanel();
 }
 
@@ -240,6 +271,173 @@ function syncProxyPanel() {
   if (apiSave) apiSave.classList.toggle("hidden", mode !== "api");
 }
 
+function syncSmsPanel() {
+  const provider = $("#smsProvider")?.value || "manual";
+  const phone = $("#phone");
+  if (phone) {
+    phone.required = provider === "manual";
+    phone.placeholder = provider === "manual" ? "+5591980133818" : "自动模式可留空，平台会先取号";
+  }
+}
+
+function openSettingsModal() {
+  $("#settingsModal")?.classList.remove("hidden");
+}
+
+function closeSettingsModal() {
+  saveRunForm();
+  $("#settingsModal")?.classList.add("hidden");
+}
+
+function smsDomPrefix(provider) {
+  return provider === "herosms" ? "herosms" : "smsbower";
+}
+
+function currentSmsProvider() {
+  const provider = $("#smsProvider")?.value || "manual";
+  return provider === "herosms" ? "herosms" : provider === "smsbower" ? "smsbower" : "manual";
+}
+
+function smsProviderPayload(provider) {
+  const prefix = smsDomPrefix(provider);
+  return {
+    sms_provider: provider,
+    [`${prefix}_api_key`]: $(`#${prefix}ApiKey`)?.value || "",
+    [`${prefix}_base_url`]: $(`#${prefix}BaseUrl`)?.value || "",
+    [`${prefix}_service`]: smsInputValue(provider, "services"),
+    [`${prefix}_country`]: smsInputValue(provider, "countries"),
+    country: smsInputValue(provider, "countries"),
+  };
+}
+
+function optionText(option) {
+  const code = option.code || "";
+  const label = option.label || code;
+  return code && label !== code ? `${label} (${code})` : label;
+}
+
+function smsOptionDisplay(provider, kind, option) {
+  return option.label || option.code || "";
+}
+
+function findSmsOption(provider, kind, value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  const rows = state.smsOptions[provider]?.[kind] || [];
+  return rows.find(row => {
+    return [
+      row.code || "",
+      row.label || "",
+      optionText(row),
+      smsOptionDisplay(provider, kind, row),
+    ].some(candidate => String(candidate).trim().toLowerCase() === text);
+  }) || null;
+}
+
+function smsInputValue(provider, kind) {
+  const prefix = smsDomPrefix(provider);
+  const suffix = kind === "countries" ? "Country" : "Service";
+  const input = $(`#${prefix}${suffix}`);
+  const value = input?.value.trim() || "";
+  const row = findSmsOption(provider, kind, value);
+  return row?.code || value;
+}
+
+function syncSmsInputDisplay(provider, kind) {
+  const prefix = smsDomPrefix(provider);
+  const suffix = kind === "countries" ? "Country" : "Service";
+  const input = $(`#${prefix}${suffix}`);
+  if (!input?.value.trim()) return;
+  const row = findSmsOption(provider, kind, input.value);
+  if (row) input.value = smsOptionDisplay(provider, kind, row);
+}
+
+function renderSmsSelect(provider, kind) {
+  const prefix = smsDomPrefix(provider);
+  const suffix = kind === "countries" ? "Country" : "Service";
+  const input = $(`#${prefix}${suffix}`);
+  const list = $(`#${prefix}${suffix}Options`);
+  if (!input || !list) return;
+  const current = input.value || "";
+  const filter = current.trim().toLowerCase();
+  const rows = state.smsOptions[provider]?.[kind] || [];
+  const filtered = rows.filter(row => {
+    const text = smsOptionDisplay(provider, kind, row).toLowerCase();
+    return !filter || text.includes(filter);
+  }).slice(0, 300);
+  list.innerHTML = "";
+  const source = filtered.length ? filtered : (current ? [{ code: current, label: current }] : []);
+  source.forEach(row => {
+    const opt = document.createElement("option");
+    opt.value = smsOptionDisplay(provider, kind, row);
+    list.appendChild(opt);
+  });
+}
+
+function setSmsOptionsStatus(text, bad = false) {
+  const el = $("#smsOptionsStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("bad-text", Boolean(bad));
+}
+
+async function refreshSmsOptions(provider = currentSmsProvider(), silent = false) {
+  if (provider === "manual") return;
+  const prefix = smsDomPrefix(provider);
+  const apiKey = $(`#${prefix}ApiKey`)?.value.trim() || "";
+  if (!apiKey) {
+    if (!silent) toast("请先填写接码平台 API Key");
+    return;
+  }
+  try {
+    setSmsOptionsStatus("正在拉取接码平台 service / country...");
+    const data = await api("/api/sms/options", {
+      method: "POST",
+      body: JSON.stringify(smsProviderPayload(provider)),
+    });
+    state.smsOptions[provider] = {
+      countries: data.countries || [],
+      services: data.services || [],
+    };
+    syncSmsInputDisplay(provider, "countries");
+    syncSmsInputDisplay(provider, "services");
+    renderSmsSelect(provider, "countries");
+    renderSmsSelect(provider, "services");
+    setSmsOptionsStatus(`已加载 ${provider}：${state.smsOptions[provider].services.length} 个 service，${state.smsOptions[provider].countries.length} 个 country`);
+    saveRunForm();
+  } catch (err) {
+    setSmsOptionsStatus(err.message || "接码选项加载失败", true);
+    if (!silent) toast(err.message);
+  }
+}
+
+async function refreshConfiguredSmsOptions(silent = false) {
+  const providers = ["herosms", "smsbower"].filter(provider => {
+    const prefix = smsDomPrefix(provider);
+    return Boolean($(`#${prefix}ApiKey`)?.value.trim());
+  });
+  if (!providers.length) {
+    if (!silent) toast("请先填写至少一个接码平台 API Key");
+    return;
+  }
+  const current = currentSmsProvider();
+  const ordered = providers.includes(current)
+    ? [current, ...providers.filter(provider => provider !== current)]
+    : providers;
+  for (const provider of ordered) {
+    await refreshSmsOptions(provider, true);
+  }
+  if (!silent) toast("接码选项已刷新");
+}
+
+function scheduleSmsOptionsRefresh(provider) {
+  clearTimeout(state.smsOptionTimers[provider]);
+  state.smsOptionTimers[provider] = setTimeout(() => {
+    saveRunForm();
+    refreshSmsOptions(provider, true);
+  }, 800);
+}
+
 async function startJob(evt) {
   evt.preventDefault();
   saveRunForm();
@@ -256,6 +454,16 @@ async function startJob(evt) {
         max_card_attempts: Number($("#maxCardAttempts").value || 5),
         max_phone_changes: Number($("#maxPhoneChanges")?.value || 5),
         debug: $("#debug").checked,
+        sms_provider: $("#smsProvider")?.value || "manual",
+        herosms_api_key: $("#herosmsApiKey")?.value || "",
+        herosms_base_url: $("#herosmsBaseUrl")?.value || "",
+        herosms_service: smsInputValue("herosms", "services"),
+        herosms_country: smsInputValue("herosms", "countries"),
+        smsbower_api_key: $("#smsbowerApiKey")?.value || "",
+        smsbower_base_url: $("#smsbowerBaseUrl")?.value || "",
+        smsbower_service: smsInputValue("smsbower", "services"),
+        smsbower_country: smsInputValue("smsbower", "countries"),
+        sms_timeout_seconds: Number($("#smsTimeoutSeconds")?.value || 60),
         proxy_enabled: $("#proxyEnabled").checked,
         proxy_mode: $("#proxyMode")?.value || "api",
         proxy_pool_text: $("#proxyPool")?.value || "",
@@ -319,6 +527,42 @@ function bind() {
   $("#copyResult")?.addEventListener("click", copyResult);
   $("#copyLogs")?.addEventListener("click", copyLogs);
   $("#clearCurrent")?.addEventListener("click", () => selectJob(""));
+  $("#openSettings")?.addEventListener("click", openSettingsModal);
+  $("#closeSettings")?.addEventListener("click", closeSettingsModal);
+  $("#settingsModal")?.addEventListener("click", event => {
+    if (event.target?.id === "settingsModal") closeSettingsModal();
+  });
+  $("#smsProvider")?.addEventListener("change", () => {
+    syncSmsPanel();
+    saveRunForm();
+    refreshSmsOptions(currentSmsProvider(), true);
+  });
+  $("#refreshSmsOptions")?.addEventListener("click", () => refreshConfiguredSmsOptions(false));
+  ["herosms", "smsbower"].forEach(provider => {
+    const prefix = smsDomPrefix(provider);
+    $(`#${prefix}ApiKey`)?.addEventListener("change", () => {
+      saveRunForm();
+      refreshSmsOptions(provider, true);
+    });
+    $(`#${prefix}ApiKey`)?.addEventListener("input", () => scheduleSmsOptionsRefresh(provider));
+    $(`#${prefix}BaseUrl`)?.addEventListener("change", () => {
+      saveRunForm();
+      refreshSmsOptions(provider, true);
+    });
+    $(`#${prefix}Country`)?.addEventListener("input", () => {
+      renderSmsSelect(provider, "countries");
+      saveRunForm();
+    });
+    $(`#${prefix}Country`)?.addEventListener("change", () => {
+      saveRunForm();
+      refreshSmsOptions(provider, true);
+    });
+    $(`#${prefix}Service`)?.addEventListener("input", () => {
+      renderSmsSelect(provider, "services");
+      saveRunForm();
+    });
+    $(`#${prefix}Service`)?.addEventListener("change", saveRunForm);
+  });
   $("#proxyEnabled")?.addEventListener("change", () => {
     syncProxyPanel();
     saveRunForm();
@@ -334,6 +578,7 @@ function bind() {
 try {
   loadRunForm();
   bind();
+  refreshConfiguredSmsOptions(true);
   health();
   refreshJobs().then(() => pollCurrent(true));
   setInterval(health, 8000);
