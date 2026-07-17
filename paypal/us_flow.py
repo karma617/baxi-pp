@@ -38,6 +38,12 @@ class PayPalUSFlow(PayPalFlow):
     lang = "en"
     locale = "en_US"
     flow_name = "US"
+    checkout_channel = "MOBILE"
+    direct_signup_from_initial_ec = True
+    require_ec_signup_context = True
+    signup_page_country = "CN"
+    signup_page_locale = "en_CN"
+    phase4_browser_authorize = True
     phone_calling_code = "1"
     billing_reason = "Ul9FUlJPUg=="
     billing_next_action_fallback = ""
@@ -49,6 +55,9 @@ class PayPalUSFlow(PayPalFlow):
         self.state.country = self.country
         self.state.lang = self.lang
         self.state.locale = self.locale
+        accept_language = "en-US,en;q=0.9"
+        self.session._base_client_kwargs["headers"]["Accept-Language"] = accept_language
+        self.session.client.headers["Accept-Language"] = accept_language
 
     def _build_signup_url(self) -> str:
         params: list[tuple[str, str]] = []
@@ -56,8 +65,8 @@ class PayPalUSFlow(PayPalFlow):
             params.append(("ssrt", self.state.ssrt))
         params.extend([
             ("ul", "1"),
-            ("locale.x", self.locale),
-            ("country.x", self.country),
+            ("locale.x", self.signup_page_locale),
+            ("country.x", self.signup_page_country),
             ("ba_token", self.ba_token),
             ("token", self.state.ec_token),
             ("rcache", "1"),
@@ -280,7 +289,30 @@ class PayPalUSFlow(PayPalFlow):
     def _phase2_create_account_graphql_warmup(self):
         return None
 
+    def _hermes_reason_param(self, errors: list[dict] | None = None) -> str:
+        self.state.signup_contingency_reason = "R_ERROR"
+        return self.billing_reason
+
     def _phase4_authorize(self) -> dict:
+        if not self.phase4_browser_authorize:
+            return self._phase4_pay_billing_authorize()
+
+        logger.info("--- Phase 4: {} Hermes/Hagrid authorization ---", self.flow_name)
+        result = PayPalFlow._phase4_authorize(self)
+        if result.get("status") == "success":
+            return result
+
+        logger.warning(
+            "{} Hermes/Hagrid authorize did not complete; falling back to HAR /pay/billing. error={}",
+            self.flow_name,
+            result.get("error"),
+        )
+        fallback = self._phase4_pay_billing_authorize()
+        if fallback.get("status") == "success":
+            fallback["graphql_authorize_error"] = result.get("error")
+        return fallback
+
+    def _phase4_pay_billing_authorize(self) -> dict:
         logger.info("--- Phase 4: {} /pay/billing approval ---", self.flow_name)
         billing_url = self._us_billing_url()
         hermes_url = self._us_hermes_url()

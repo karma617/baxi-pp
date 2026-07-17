@@ -1064,6 +1064,28 @@ Hero-SMS 的 service 列表改为只通过 `getPrices` 推导，不再调用会�
 回滚：移除 `merge_sms_service_labels()` 和 `_extract_stock_count()`，并将 Hero-SMS `get_services()` 恢复为只调用 `getPrices` 后 `parse_sms_price_services()`。
 需要在页面点击“刷新接码选项”或重启网页服务后重新加载选项才生效。
 
+## 2026-07-16 - Task: US PayPal 链路按 HAR 与 BR 思路修复
+
+### What was done
+US 分支前段按 `us-pay.openai.com.har` 调整：signup 页面 URL 使用 HAR 中的 `country.x=CN`、`locale.x=en_CN`，但 GraphQL 上下文继续保持 `US/en_US`，checkout channel 改为 `MOBILE`，会话 Accept-Language 改为 `en-US,en;q=0.9`。US Phase4 改为优先走 BR 同款 Hermes/Hagrid `billing.authorize`：先绑定 Hermes review，再打开 `billingLite=1#/billingweb/review` 并执行 `BillingAgreementContextQueryForAddCard + authorize`；只有 Hagrid authorize 没拿到 `returnURL` 时才回落到 US HAR 的 `/pay/billing`。BA 分支显式保持原 BA HAR `/pay/billing` 链路，不跟随 US 改动。
+
+### Testing
+- .\.venv\Scripts\python.exe -m py_compile paypal\flow.py paypal\us_flow.py paypal\ba_flow.py tests\test_ba_har_contract.py
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract -v：10 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_authorize_success_gate -v：7 passed
+- .\.venv\Scripts\python.exe -m unittest tests.test_ba_har_contract tests.test_authorize_success_gate tests.test_browser_proxy_binding tests.test_sms_providers -v：32 passed
+
+### Notes
+改动文件：
+- paypal/us_flow.py：US signup URL、GraphQL channel、Accept-Language、Hermes reason 和 Phase4 Hagrid authorize 优先/`pay/billing` fallback 逻辑
+- paypal/flow.py：将 BR Phase4 的浏览器/Hagrid authorize 能力扩展为可由 US 显式启用
+- paypal/ba_flow.py：固定 BA signup 页面地区参数并保持 BA 使用 `/pay/billing`
+- tests/test_ba_har_contract.py：新增 US signup HAR 参数和 US Phase4 Hagrid authorize 优先的回归测试
+- docs/hermes-session-bind.md：同步 BR/US/BA Phase4 分流说明
+- progress.md：追加本轮施工记录
+回滚：反向移除 `PayPalUSFlow` 中 `signup_page_country/signup_page_locale/phase4_browser_authorize/_phase4_pay_billing_authorize` 等本轮 US 分支改动；将 `paypal/flow.py` 中 `browser_authorize_flow` 恢复为只判断 BR；移除 BA 中本轮新增的显式 class 属性；删除本轮新增测试和文档段落。
+需要重启网页服务后 US 新链路才生效。
+
 ## 2026-07-16 - Task: 接码 country 按名称显示和筛选
 
 ### What was done

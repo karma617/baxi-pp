@@ -15,6 +15,9 @@ class PayPalBAFlow(PayPalUSFlow):
     checkout_channel = "MOBILE"
     direct_signup_from_initial_ec = True
     require_ec_signup_context = True
+    signup_page_country = "BA"
+    signup_page_locale = "en_BA"
+    phase4_browser_authorize = False
     phone_calling_code = "387"
     billing_reason = "Q0FSRF9HRU5FUklDX0VSUk9S"
     billing_next_action_fallback = "7fd4b0dd65f4e1bc4b2d14d4a0b4e1a2f9b2507fe6"

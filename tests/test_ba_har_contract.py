@@ -8,6 +8,7 @@ from socksio.exceptions import ProtocolError
 from paypal.ba_flow import PayPalBAFlow
 from paypal.models import generate_country_materials
 from paypal.session import PayPalSession
+from paypal.us_flow import PayPalUSFlow
 
 
 class FakeResponse:
@@ -64,6 +65,59 @@ class Phase4Session:
         return None
 
 
+class USGraphqlPhase4Session:
+    def __init__(self):
+        self.get_calls = []
+        self.post_calls = []
+        self.graphql_calls = []
+
+    def get(self, url, **kwargs):
+        self.get_calls.append((url, kwargs))
+        if "pm-redirects.stripe.com" in url:
+            return FakeResponse("https://pay.openai.com/c/pay/test?redirect_status=succeeded")
+        html = "<html>billingweb hagrid returnURL pay/billing " + ("x" * 6000) + "</html>"
+        return FakeResponse(url, html)
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        raise AssertionError("US GraphQL authorize success should not use /pay/billing fallback")
+
+    def graphql(self, operation_name, query, variables, **kwargs):
+        self.graphql_calls.append((operation_name, variables, kwargs))
+        if operation_name == "BillingAgreementContextQueryForAddCard":
+            return [
+                {
+                    "data": {
+                        "billing": {
+                            "billingAgreementContext": {
+                                "billingAgreementToken": "BA-CONTEXT",
+                                "returnURL": {"href": "https://merchant.example/context-return"},
+                                "buyer": {"userId": "BUYER-US"},
+                            }
+                        }
+                    }
+                }
+            ]
+        if operation_name == "authorize":
+            return [
+                {
+                    "data": {
+                        "billing": {
+                            "authorize": {
+                                "billingAgreementToken": "BA-AUTH-US",
+                                "returnURL": {"href": "https://pm-redirects.stripe.com/return/test"},
+                                "buyer": {"userId": "BUYER-US"},
+                            }
+                        }
+                    }
+                }
+            ]
+        return {"data": {}}
+
+    def close(self):
+        return None
+
+
 class RetryClient:
     def __init__(self):
         self.calls = 0
@@ -92,6 +146,16 @@ class BAHarContractTests(unittest.TestCase):
         user, card, address, _ = generate_country_materials("+38761123456", "BA")
         return PayPalBAFlow(
             "BA-TEST12345678",
+            user,
+            card,
+            address,
+            proxy_enabled=False,
+        )
+
+    def make_us_flow(self):
+        user, card, address, _ = generate_country_materials("+12272534552", "US")
+        return PayPalUSFlow(
+            "BA-66C55158E3736315C",
             user,
             card,
             address,
@@ -186,6 +250,20 @@ class BAHarContractTests(unittest.TestCase):
         finally:
             flow.close()
 
+    def test_us_signup_shell_matches_har_country_locale_split(self):
+        flow = self.make_us_flow()
+        try:
+            flow.state.ssrt = "1784016772388"
+            flow.state.ec_token = "EC-8CG74216YL5999027"
+            signup = urllib.parse.parse_qs(urllib.parse.urlsplit(flow._build_signup_url()).query)
+            self.assertEqual(["CN"], signup["country.x"])
+            self.assertEqual(["en_CN"], signup["locale.x"])
+            self.assertEqual("US", flow.state.country)
+            self.assertEqual("en_US", flow.state.locale)
+            self.assertEqual("MOBILE", flow.checkout_channel)
+        finally:
+            flow.close()
+
     def test_phase0_extracts_ec_token_from_initial_approval_html(self):
         flow = self.make_flow()
         flow.session.close()
@@ -272,6 +350,31 @@ class BAHarContractTests(unittest.TestCase):
         )
         self.assertEqual(["BA-TEST12345678"], referer_query["token"])
         self.assertNotIn("paypal_client_cfci", referer_query)
+
+    def test_us_phase4_prefers_hagrid_authorize_before_pay_billing(self):
+        flow = self.make_us_flow()
+        flow.session.close()
+        flow.state.ec_token = "EC-8CG74216YL5999027"
+        flow.state.ssrt = "1784016772388"
+        flow.state.euat_token = "EUAT-TEST-TOKEN"
+        flow.state.signup_url = flow._build_signup_url()
+        phase4_session = USGraphqlPhase4Session()
+        flow.session = phase4_session
+
+        with (
+            patch("paypal.flow.send_analytics_ts"),
+            patch.object(flow, "_run_headed_browser_assist", return_value=None),
+            patch.object(flow, "_bind_euat", return_value=None),
+        ):
+            result = flow._phase4_authorize()
+
+        self.assertEqual("success", result["status"])
+        self.assertEqual("BA-AUTH-US", result["ba_token"])
+        self.assertEqual("https://pm-redirects.stripe.com/return/test", result["return_url"])
+        self.assertFalse(phase4_session.post_calls)
+        ops = [call[0] for call in phase4_session.graphql_calls]
+        self.assertIn("BillingAgreementContextQueryForAddCard", ops)
+        self.assertIn("authorize", ops)
 
 
 if __name__ == "__main__":

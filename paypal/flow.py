@@ -2646,6 +2646,9 @@ class PayPalFlow:
         billing_review_url = self._build_billing_review_url(hermes_review_url)
         billing_review_referer = billing_review_url.split("#", 1)[0]
         is_br_flow = (self.address.country or self.state.country or "").upper() == "BR"
+        browser_authorize_flow = is_br_flow or bool(
+            getattr(self, "phase4_browser_authorize", False)
+        )
         # Keep review referer as the contingency shell URL (no forced billingLite).
         review_referer = hermes_review_url
         review_url = hermes_review_url
@@ -2767,12 +2770,13 @@ class PayPalFlow:
             logger.warning("Hermes pre-bind failed: {}", e)
 
         if not hermes_bound:
+            country_label = (self.address.country or self.state.country or "BR").upper()
             return {
                 "status": "error",
                 "error": (
                     "Hermes buyer session bind failed (403/empty shell). "
                     "Authorize skipped to avoid BUYER_NOT_SET. "
-                    "Reopen with a cleaner residential sticky BR proxy/session."
+                    f"Reopen with a cleaner residential sticky {country_label} proxy/session."
                 ),
                 "billingAgreementId": billing_agreement_id,
                 "euat_present": bool(self.state.euat_token),
@@ -2783,12 +2787,15 @@ class PayPalFlow:
 
         ba_token_resp = self.ba_token
         browser_authorize_result = None
-        if is_br_flow:
+        if browser_authorize_flow:
             try:
-                logger.info("Phase4 BR step1c: open Hermes billing review route before authorize...")
+                logger.info(
+                    "Phase4 {} step1c: open Hermes billing review route before authorize...",
+                    (self.address.country or self.state.country or "").upper() or "BR",
+                )
                 assist = self._run_headed_browser_assist(
                     billing_review_url,
-                    purpose="phase4_br_billing_review",
+                    purpose=f"phase4_{(self.address.country or self.state.country or 'BR').lower()}_billing_review",
                     bootstrap_url=signup_referer,
                     authorize_variables={
                         "billingAgreementId": billing_agreement_id,
@@ -2813,7 +2820,7 @@ class PayPalFlow:
                 else:
                     referer = billing_review_referer
             except Exception as e:
-                logger.warning("BR billing review browser bind failed: {}", e)
+                logger.warning("Billing review browser bind failed: {}", e)
                 referer = billing_review_referer
 
             context_warm = self._phase4_billing_context_warm(
@@ -2948,11 +2955,11 @@ class PayPalFlow:
                 pass
             try:
                 assist = self._run_headed_browser_assist(
-                    billing_review_url if is_br_flow else hermes_review_url,
+                    billing_review_url if browser_authorize_flow else hermes_review_url,
                     purpose="phase4_hermes_retry",
                     bootstrap_url=signup_referer,
                 )
-                rebind_url = billing_review_referer if is_br_flow else hermes_review_url
+                rebind_url = billing_review_referer if browser_authorize_flow else hermes_review_url
                 if assist and getattr(assist, "final_url", ""):
                     final_url = (assist.final_url or "").strip()
                     if "webapps/hermes" in final_url or "/pay/billing" in final_url:
@@ -2983,7 +2990,7 @@ class PayPalFlow:
                 buyer_from_hermes = self._extract_buyer_id_from_html(html)
                 if buyer_from_hermes:
                     self.state.user_id = buyer_from_hermes
-                if is_br_flow:
+                if browser_authorize_flow:
                     context_warm = self._phase4_billing_context_warm(
                         billing_agreement_id,
                         common_headers["Referer"],
@@ -3019,7 +3026,7 @@ class PayPalFlow:
             logger.error(
                 "authorize failed with BUYER_NOT_SET; refusing ContextQuery fake-success fallback"
             )
-            if not is_br_flow:
+            if not browser_authorize_flow:
                 recovery = self._phase4_pay_billing_recovery(referer)
                 if recovery and recovery.get("status") == "success":
                     return recovery
